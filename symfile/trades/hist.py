@@ -36,6 +36,7 @@ from symfile.mds.massive.refs import RefRow
 
 MIN_144_VALUE = 25_000_000
 MIN_REG_VALUE = 50_000_000
+MAX_MCAP_PCT = 0.20  # reject if > 20% of mkt_cap
 
 
 @dataclass
@@ -178,6 +179,8 @@ def _scan_reg(
             else d.shares * px
         )
         if implied < MIN_REG_VALUE:
+            return
+        if implied > ref.mkt_cap * MAX_MCAP_PCT:
             return
         trades.append(
             Trade(
