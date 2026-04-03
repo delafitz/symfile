@@ -1,17 +1,20 @@
 """symfile — SEC filing tools.
 
 Usage:
-    uv run python -m symfile refs
-    uv run python -m symfile scan [--full] [--date YYYYMMDD]
     uv run python -m symfile tickers
+    uv run python -m symfile refs
     uv run python -m symfile cusips
+    uv run python -m symfile build
+    uv run python -m symfile holders SYMBOL
+    uv run python -m symfile scan [--full] [--date YYYYMMDD]
 
 Commands:
-    refs      Build/refresh reference data cache
-    scan      Scan EDGAR 144 index for block trades
-              (>$25M implied value, mkt_cap >$1B)
     tickers   Load/refresh the symbol-CIK mapping
+    refs      Build/refresh reference data cache
     cusips    Build CUSIP->symbol map from 13F filings
+    build     Build quarterly holdings parquet files
+    holders   Top holders report for a symbol
+    scan      Scan EDGAR 144 index for block trades
 """
 
 import asyncio
@@ -226,6 +229,25 @@ def cmd_cusips() -> None:
     )
 
 
+def cmd_build() -> None:
+    from symfile.holdings.build import build_all
+
+    cusip_map = load_cusips()
+    build_all(cusip_map)
+
+
+def cmd_holders(args: list[str]) -> None:
+    from symfile.holdings.report import (
+        top_holders,
+    )
+
+    if not args:
+        print('usage: holders SYMBOL')
+        return
+    symbol = args[0].upper()
+    top_holders(symbol)
+
+
 def main() -> None:
     args = sys.argv[1:]
     if not args:
@@ -237,10 +259,14 @@ def main() -> None:
         cmd_tickers()
     elif cmd == 'refs':
         cmd_refs()
-    elif cmd == 'scan':
-        cmd_scan(args[1:])
     elif cmd == 'cusips':
         cmd_cusips()
+    elif cmd == 'build':
+        cmd_build()
+    elif cmd == 'holders':
+        cmd_holders(args[1:])
+    elif cmd == 'scan':
+        cmd_scan(args[1:])
     else:
         print(f'unknown command: {cmd}')
         print(__doc__)
