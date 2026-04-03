@@ -52,6 +52,8 @@ class Trade:
     relationship: str  # 144: rel, reg: SEC|PRI
     underwriter: str
     mkt_cap: float
+    is_bought: bool = False
+    is_ipo: bool = False
 
 
 def _quarters(
@@ -203,6 +205,8 @@ def _scan_reg(
                 ),
                 underwriter=d.underwriter,
                 mkt_cap=ref.mkt_cap,
+                is_bought=d.is_bought,
+                is_ipo=d.is_ipo,
             )
         )
 

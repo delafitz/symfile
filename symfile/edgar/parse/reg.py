@@ -88,6 +88,8 @@ class FilingReg:
     last_price: float
     total: float
     is_seller: bool
+    is_bought: bool  # underwriter bought the shares
+    is_ipo: bool
     underwriter: str
 
 
@@ -193,6 +195,13 @@ def parse_reg(
         _SELLER_RE.search(low[:5000])
     )
 
+    # Bought deal: underwriter purchased shares
+    low_full = clean[:20000].lower()
+    is_bought = 'agreed to purchase' in low_full
+    is_ipo = (
+        'initial public offering' in low_full
+    )
+
     # Offer price
     price = 0.0
     pm = _OFFER_PX_RE.search(clean[:8000])
@@ -221,5 +230,7 @@ def parse_reg(
         last_price=last_price,
         total=total,
         is_seller=is_seller,
+        is_bought=is_bought,
+        is_ipo=is_ipo,
         underwriter=underwriter,
     )
