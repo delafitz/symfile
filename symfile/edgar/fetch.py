@@ -2,8 +2,9 @@
 cache.
 
 Generic fetch infrastructure: rate-limited HTTP,
-429 retry, MD5-keyed disk cache, and a concurrent
-bulk fetcher with token-bucket throttle.
+429 retry with global backoff, MD5-keyed disk cache,
+and a concurrent bulk fetcher with token-bucket
+throttle.
 """
 
 import asyncio
@@ -20,11 +21,15 @@ DATA_DIR = (
 CACHE_DIR = DATA_DIR / 'filings'
 
 USER_AGENT = 'symfile dev@symfile.dev'
-SEC_RPS = 6
+SEC_RPS = 9
 MAX_RETRIES = 3
 FILING_BASE = 'https://www.sec.gov/Archives/'
 
 _last_fetch = 0.0
+
+# Global backoff: when any thread gets a 429,
+# all threads pause until this time
+_backoff_until = 0.0
 
 
 # --- HTTP helpers ---
@@ -51,13 +56,21 @@ def fetch_url(url: str) -> bytes | None:
 
 
 def fetch_url_retry(url: str) -> bytes | None:
-    """Fetch URL with 429 retry. No rate limiting
-    (caller handles via token bucket)."""
+    """Fetch URL with 429 retry and global backoff.
+
+    On 429: sets a global backoff that pauses ALL
+    concurrent fetchers, not just this one.
+    """
+    global _backoff_until
     req = urllib.request.Request(
         url,
         headers={'User-Agent': USER_AGENT},
     )
     for attempt in range(MAX_RETRIES):
+        # Respect global backoff from any thread
+        wait = _backoff_until - time.time()
+        if wait > 0:
+            time.sleep(wait)
         try:
             return urllib.request.urlopen(
                 req, timeout=30
@@ -67,8 +80,20 @@ def fetch_url_retry(url: str) -> bytes | None:
                 e.code == 429
                 and attempt < MAX_RETRIES - 1
             ):
-                time.sleep(2**attempt)
+                delay = 10 * (attempt + 1)
+                _backoff_until = (
+                    time.time() + delay
+                )
+                print(
+                    f'  429 — global backoff '
+                    f'{delay}s'
+                )
+                time.sleep(delay)
                 continue
+            if e.code == 429:
+                # Final retry failed — don't
+                # log every single one
+                return None
             print(f'  fetch error: {url}: {e}')
             return None
         except Exception as e:
@@ -121,7 +146,7 @@ async def fetch_many_async(
 
     Checks disk cache first; fetches uncached.
     Token-bucket rate limiter stays under
-    SEC_RPS req/s.
+    SEC_RPS req/s. Global backoff on 429.
     """
     to_fetch: list[T] = []
     for item in items:
@@ -140,16 +165,21 @@ async def fetch_many_async(
     print(f'  {len(to_fetch)} to fetch...')
     bucket = asyncio.Queue(maxsize=SEC_RPS)
     done = 0
+    failed = 0
     total = len(to_fetch)
 
     async def refill() -> None:
         interval = 1.0 / SEC_RPS
         while True:
+            # Pause refill during global backoff
+            wait = _backoff_until - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
             await bucket.put(True)
             await asyncio.sleep(interval)
 
     async def fetch_one(item: T) -> None:
-        nonlocal done
+        nonlocal done, failed
         await bucket.get()
         raw = await asyncio.to_thread(
             fetch_url_retry,
@@ -157,10 +187,15 @@ async def fetch_many_async(
         )
         done += 1
         if done % 500 == 0:
-            print(f'  ... {done}/{total}')
+            msg = f'  ... {done}/{total}'
+            if failed:
+                msg += f' ({failed} failed)'
+            print(msg)
         if raw:
             put_cache(key_fn(item), raw)
             callback(item, raw)
+        else:
+            failed += 1
 
     filler = asyncio.create_task(refill())
     try:
@@ -172,3 +207,5 @@ async def fetch_many_async(
         )
     finally:
         filler.cancel()
+    if failed:
+        print(f'  {failed}/{total} failed')
