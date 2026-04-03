@@ -8,6 +8,7 @@ throttle.
 """
 
 import asyncio
+import gzip
 import hashlib
 import time
 import urllib.request
@@ -112,13 +113,21 @@ def cache_key(name: str) -> str:
 
 
 def cache_path(name: str) -> Path:
+    return CACHE_DIR / f'{cache_key(name)}.gz'
+
+
+def _legacy_path(name: str) -> Path:
     return CACHE_DIR / f'{cache_key(name)}.txt'
 
 
 def get_cached(name: str) -> bytes | None:
     p = cache_path(name)
     if p.exists():
-        return p.read_bytes()
+        return gzip.decompress(p.read_bytes())
+    # Fall back to uncompressed legacy file
+    lp = _legacy_path(name)
+    if lp.exists():
+        return lp.read_bytes()
     return None
 
 
@@ -128,7 +137,9 @@ def put_cache(
     CACHE_DIR.mkdir(
         parents=True, exist_ok=True
     )
-    cache_path(name).write_bytes(data)
+    cache_path(name).write_bytes(
+        gzip.compress(data)
+    )
 
 
 # --- Index cache (separate dir) ---
