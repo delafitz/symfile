@@ -1,0 +1,16 @@
+[project]
+name = "symfile"
+version = "0.1.0"
+description = "SEC filing tools"
+requires-python = ">=3.13"
+dependencies = ["massive"]
+
+[tool.ruff]
+line-length = 70
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.basedpyright]
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+typeCheckingMode = "off"
