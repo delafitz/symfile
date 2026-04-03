@@ -55,18 +55,22 @@ def fetch_url(url: str) -> bytes | None:
         return None
 
 
-def fetch_url_retry(url: str) -> bytes | None:
-    """Fetch URL with 429 retry and global backoff.
+BACKOFF_SECS = 600  # 10 minutes on 429
 
-    On 429: sets a global backoff that pauses ALL
-    concurrent fetchers, not just this one.
+
+def fetch_url_retry(url: str) -> bytes | None:
+    """Fetch URL with 429 handling.
+
+    On 429: assume 10-minute IP ban. Set global
+    backoff so all threads pause, sleep, then
+    retry once.
     """
     global _backoff_until
     req = urllib.request.Request(
         url,
         headers={'User-Agent': USER_AGENT},
     )
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(2):  # initial + 1 retry
         # Respect global backoff from any thread
         wait = _backoff_until - time.time()
         if wait > 0:
@@ -76,23 +80,18 @@ def fetch_url_retry(url: str) -> bytes | None:
                 req, timeout=30
             ).read()
         except urllib.request.HTTPError as e:
-            if (
-                e.code == 429
-                and attempt < MAX_RETRIES - 1
-            ):
-                delay = 10 * (attempt + 1)
+            if e.code == 429 and attempt == 0:
                 _backoff_until = (
-                    time.time() + delay
+                    time.time() + BACKOFF_SECS
                 )
                 print(
-                    f'  429 — global backoff '
-                    f'{delay}s'
+                    f'\n  429 — SEC rate limit. '
+                    f'sleeping {BACKOFF_SECS}s '
+                    f'(all threads paused)'
                 )
-                time.sleep(delay)
+                time.sleep(BACKOFF_SECS)
                 continue
             if e.code == 429:
-                # Final retry failed — don't
-                # log every single one
                 return None
             print(f'  fetch error: {url}: {e}')
             return None
