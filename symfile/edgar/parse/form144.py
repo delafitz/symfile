@@ -22,13 +22,16 @@ class Filing144:
     mkt_value: float
     sale_date: str
     broker: str
-    nature: str  # how acquired (RSU, founders, etc.)
+    nature: str  # how acquired (RSU, etc.)
     remarks: str
 
 
-def parse_144(raw: bytes) -> Filing144 | None:
-    """Parse a Form 144 .txt filing into structured
-    data. Returns None if XML cannot be parsed."""
+def parse_144(
+    raw: bytes,
+) -> Filing144 | None:
+    """Parse a Form 144 .txt filing into
+    structured data. Returns None if XML cannot
+    be parsed."""
     text = raw.decode('latin-1')
 
     # Extract the XML block from SGML wrapper
@@ -50,7 +53,9 @@ def parse_144(raw: bytes) -> Filing144 | None:
         for tag in path.split('/'):
             found = None
             for child in node:
-                local = _NS_RE.sub('', child.tag)
+                local = _NS_RE.sub(
+                    '', child.tag
+                )
                 if local == tag:
                     found = child
                     break
@@ -68,7 +73,9 @@ def parse_144(raw: bytes) -> Filing144 | None:
         for tag in parent_path.split('/'):
             found = None
             for child in node:
-                local = _NS_RE.sub('', child.tag)
+                local = _NS_RE.sub(
+                    '', child.tag
+                )
                 if local == tag:
                     found = child
                     break
@@ -90,7 +97,8 @@ def parse_144(raw: bytes) -> Filing144 | None:
         'TheSecuritiesAreToBeSold'
     )
     rels = find_all(
-        'formData/issuerInfo/relationshipsToIssuer',
+        'formData/issuerInfo'
+        '/relationshipsToIssuer',
         'relationshipToIssuer',
     )
     title = find(

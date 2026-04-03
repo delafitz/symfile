@@ -17,19 +17,19 @@ import sys
 import time
 from datetime import date, timedelta
 
-from symfile.index import (
+from symfile.edgar.index import (
     fetch_daily_index,
     fetch_filings_async,
     fetch_full_index,
     filter_forms,
 )
-from symfile.parse144 import parse_144
-from symfile.refs import (
+from symfile.edgar.parse.form144 import parse_144
+from symfile.mds.syms import (
     RefRow,
     build_cik_map,
-    load_refs,
+    load_syms,
+    load_tickers,
 )
-from symfile.tickers import load_tickers
 
 MIN_TRADE_VALUE = 25_000_000
 
@@ -46,9 +46,8 @@ def cmd_tickers() -> None:
 
 
 def cmd_refs() -> None:
-    tickers = load_tickers()
-    refs = load_refs(tickers, max_age_days=0)
-    print(f'{len(refs)} refs loaded')
+    syms = load_syms(max_age_days=0)
+    print(f'{len(syms)} refs loaded')
 
 
 def cmd_scan(args: list[str]) -> None:
@@ -63,9 +62,9 @@ def cmd_scan(args: list[str]) -> None:
         )
     use_full = '--full' in args
 
-    # Load refs (mkt_cap >= $1B, has price)
-    refs = load_refs()
-    cik_map = build_cik_map(refs)
+    # Load syms (mkt_cap >= $1B, has price)
+    syms = load_syms()
+    cik_map = build_cik_map(syms)
     print(f'\nuniverse: {len(cik_map)} CIKs')
 
     # Fetch EDGAR index
@@ -157,7 +156,7 @@ def cmd_scan(args: list[str]) -> None:
         entries.sort()
         dt0, impl0, rel0 = entries[0]
         deduped.append((
-            refs[sym],
+            syms[sym],
             dt0,
             shares,
             impl0,

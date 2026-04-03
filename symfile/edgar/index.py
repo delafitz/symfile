@@ -1,0 +1,139 @@
+"""EDGAR daily-index and full-index fetchers.
+
+Parses master.idx files (pipe-delimited):
+    CIK|Company Name|Form Type|Date Filed|Filename
+"""
+
+from dataclasses import dataclass
+from datetime import date
+
+from symfile.edgar.fetch import (
+    FILING_BASE,
+    fetch_many_async,
+    fetch_url,
+    get_cached,
+    put_cache,
+)
+
+BASE = 'https://www.sec.gov/Archives/edgar'
+DAILY_URL = (
+    f'{BASE}/daily-index/{{year}}/QTR{{qtr}}'
+    '/master.{stamp}.idx'
+)
+FULL_URL = (
+    f'{BASE}/full-index/{{year}}/QTR{{qtr}}'
+    '/master.idx'
+)
+
+FORM_PREFIXES = ('144',)
+
+
+@dataclass
+class Filing:
+    cik: str
+    company: str
+    form_type: str
+    date_filed: str
+    filename: str
+
+
+def _parse_master_idx(
+    raw: bytes,
+) -> list[Filing]:
+    """Parse a master.idx into Filing objects."""
+    filings = []
+    in_data = False
+    for line in (
+        raw.decode('latin-1').splitlines()
+    ):
+        if line.startswith('---'):
+            in_data = True
+            continue
+        if not in_data:
+            continue
+        parts = line.split('|')
+        if len(parts) != 5:
+            continue
+        filings.append(
+            Filing(
+                cik=parts[0].strip(),
+                company=parts[1].strip(),
+                form_type=parts[2].strip(),
+                date_filed=parts[3].strip(),
+                filename=parts[4].strip(),
+            )
+        )
+    return filings
+
+
+def _quarter(d: date) -> int:
+    return (d.month - 1) // 3 + 1
+
+
+def fetch_daily_index(
+    d: date,
+) -> list[Filing]:
+    """Fetch daily master.idx (cached)."""
+    stamp = d.strftime('%Y%m%d')
+    cache_name = f'daily.{stamp}'
+    cached = get_cached(cache_name)
+    if cached:
+        return _parse_master_idx(cached)
+    url = DAILY_URL.format(
+        year=d.year,
+        qtr=_quarter(d),
+        stamp=stamp,
+    )
+    raw = fetch_url(url)
+    if not raw:
+        return []
+    put_cache(cache_name, raw)
+    return _parse_master_idx(raw)
+
+
+def fetch_full_index(
+    year: int, quarter: int
+) -> list[Filing]:
+    """Fetch quarter master.idx (cached)."""
+    cache_name = f'full.{year}Q{quarter}'
+    cached = get_cached(cache_name)
+    if cached:
+        print('  (using cached index)')
+        return _parse_master_idx(cached)
+    url = FULL_URL.format(
+        year=year, qtr=quarter
+    )
+    raw = fetch_url(url)
+    if not raw:
+        return []
+    put_cache(cache_name, raw)
+    return _parse_master_idx(raw)
+
+
+def filter_forms(
+    filings: list[Filing],
+    prefixes: tuple[str, ...] = FORM_PREFIXES,
+) -> list[Filing]:
+    """Filter filings to matching form types."""
+    return [
+        f
+        for f in filings
+        if any(
+            f.form_type.startswith(p)
+            for p in prefixes
+        )
+    ]
+
+
+async def fetch_filings_async(
+    filings: list[Filing],
+    callback,
+) -> None:
+    """Fetch + process filings concurrently."""
+    await fetch_many_async(
+        filings,
+        key_fn=lambda f: f.filename,
+        url_fn=lambda f: FILING_BASE
+        + f.filename,
+        callback=callback,
+    )

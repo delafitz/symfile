@@ -1,7 +1,7 @@
 """Symbol-to-CIK mapping via Polygon tickers endpoint.
 
-Caches to data/tickers.YYYYMMDD.csv. Reuses cache if
-less than MAX_AGE_DAYS old, otherwise refetches.
+Caches to data/mds/tickers.YYYYMMDD.csv. Reuses cache
+if less than MAX_AGE_DAYS old, otherwise refetches.
 """
 
 import csv
@@ -12,7 +12,8 @@ from pathlib import Path
 
 from massive import RESTClient
 
-DATA_DIR = Path(__file__).parent.parent / 'data'
+from symfile.mds import DATA_DIR
+
 MAX_AGE_DAYS = 30
 
 
@@ -83,16 +84,20 @@ def _save(rows: list[dict]) -> Path:
 def load_tickers(
     max_age_days: int = MAX_AGE_DAYS,
 ) -> dict[str, dict]:
-    """Load symbol→{name, cik} mapping.
+    """Load symbol->{name, cik} mapping.
 
     Returns cached data if fresh, otherwise refetches.
     """
     cached = _find_cached()
-    cutoff = date.today() - timedelta(days=max_age_days)
+    cutoff = date.today() - timedelta(
+        days=max_age_days
+    )
 
     if cached and cached[1] >= cutoff:
         path = cached[0]
-        print(f'using cached tickers from {path.name}')
+        print(
+            f'using cached tickers from {path.name}'
+        )
         result = {}
         with open(path) as f:
             for row in csv.DictReader(f):
@@ -110,7 +115,7 @@ def build_cik_map(
     tickers: dict[str, dict],
     types: set[str] = {'CS'},
 ) -> dict[str, str]:
-    """Build CIK→symbol mapping, filtered to given
+    """Build CIK->symbol mapping, filtered to given
     Polygon types (default: CS = common stock only).
 
     CIK keys are unpadded to match EDGAR index format.

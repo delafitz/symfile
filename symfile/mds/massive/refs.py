@@ -1,11 +1,11 @@
 """Reference data: symbol, CIK, market cap, price.
 
-Phase 1: Polygon snapshot → prices (one call)
-Phase 2: Polygon ticker details → market cap
+Phase 1: Polygon snapshot -> prices (one call)
+Phase 2: Polygon ticker details -> market cap
          (async, concurrency pool)
 Filter:  mkt_cap >= $1B
 
-Caches to data/refs.YYYYMMDD.csv.
+Caches to data/mds/refs.YYYYMMDD.csv.
 """
 
 import asyncio
@@ -18,7 +18,8 @@ from pathlib import Path
 
 from massive import RESTClient
 
-DATA_DIR = Path(__file__).parent.parent / 'data'
+from symfile.mds import DATA_DIR
+
 MAX_AGE_DAYS = 7
 MIN_MKT_CAP = 1_000_000_000
 CONCURRENCY = 20
@@ -111,7 +112,9 @@ async def _fetch_refs_async(
             ref = RefRow(
                 symbol=sym,
                 cik=cik,
-                name=tickers[sym].get('name', ''),
+                name=tickers[sym].get(
+                    'name', ''
+                ),
                 mkt_cap=mc,
                 price=prices[sym],
             )
@@ -119,7 +122,9 @@ async def _fetch_refs_async(
                 rows.append(ref)
                 done += 1
                 if done % 100 == 0:
-                    print(f'  {done} qualifying...')
+                    print(
+                        f'  {done} qualifying...'
+                    )
 
     await asyncio.gather(
         *(fetch_one(s) for s in candidates)
@@ -184,13 +189,17 @@ def load_refs(
 
     if cached and cached[1] >= cutoff:
         path = cached[0]
-        print(f'using cached refs from {path.name}')
+        print(
+            f'using cached refs from {path.name}'
+        )
         result = _load_csv(path)
         print(f'  {len(result)} symbols')
         return result
 
     if tickers is None:
-        from symfile.tickers import load_tickers
+        from symfile.mds.massive.tickers import (
+            load_tickers,
+        )
 
         tickers = load_tickers()
 
@@ -203,7 +212,7 @@ def load_refs(
 def build_cik_map(
     refs: dict[str, RefRow],
 ) -> dict[str, RefRow]:
-    """Build CIK→RefRow mapping.
+    """Build CIK->RefRow mapping.
 
     CIK keys are unpadded to match EDGAR index format.
     """
