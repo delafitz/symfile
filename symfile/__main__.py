@@ -1,19 +1,23 @@
 """symfile — SEC filing tools.
 
 Usage:
+    uv run python -m symfile init
+    uv run python -m symfile sync
+    uv run python -m symfile holders SYMBOL
     uv run python -m symfile tickers
     uv run python -m symfile refs
     uv run python -m symfile cusips
     uv run python -m symfile build
-    uv run python -m symfile holders SYMBOL
     uv run python -m symfile scan [--full] [--date YYYYMMDD]
 
 Commands:
+    init      Initialize all market data + holdings
+    sync      Catch up on daily filings (144, 13F-HR/A)
+    holders   Top holders report for a symbol
     tickers   Load/refresh the symbol-CIK mapping
     refs      Build/refresh reference data cache
     cusips    Build CUSIP->symbol map from 13F filings
     build     Build quarterly holdings parquet files
-    holders   Top holders report for a symbol
     scan      Scan EDGAR 144 index for block trades
 """
 
@@ -248,6 +252,19 @@ def cmd_holders(args: list[str]) -> None:
     top_holders(symbol)
 
 
+def cmd_init() -> None:
+    from symfile.sync import init_mds
+
+    init_mds()
+
+
+def cmd_sync() -> None:
+    from symfile.sync import sync
+
+    new = sync()
+    print(f'{len(new)} new filings')
+
+
 def main() -> None:
     args = sys.argv[1:]
     if not args:
@@ -255,7 +272,11 @@ def main() -> None:
         return
 
     cmd = args[0]
-    if cmd == 'tickers':
+    if cmd == 'init':
+        cmd_init()
+    elif cmd == 'sync':
+        cmd_sync()
+    elif cmd == 'tickers':
         cmd_tickers()
     elif cmd == 'refs':
         cmd_refs()
