@@ -19,6 +19,7 @@ DATA_DIR = (
     / 'data'
 )
 CACHE_DIR = DATA_DIR / 'filings'
+INDEX_DIR = DATA_DIR / 'indices'
 
 USER_AGENT = 'symfile dev@symfile.dev'
 SEC_RPS = 8
@@ -128,6 +129,29 @@ def put_cache(
         parents=True, exist_ok=True
     )
     cache_path(name).write_bytes(data)
+
+
+# --- Index cache (separate dir) ---
+
+
+def index_path(name: str) -> Path:
+    return INDEX_DIR / f'{name}.idx'
+
+
+def get_index(name: str) -> bytes | None:
+    p = index_path(name)
+    if p.exists():
+        return p.read_bytes()
+    return None
+
+
+def put_index(
+    name: str, data: bytes
+) -> None:
+    INDEX_DIR.mkdir(
+        parents=True, exist_ok=True
+    )
+    index_path(name).write_bytes(data)
 
 
 # --- Async bulk fetch ---

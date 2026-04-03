@@ -11,8 +11,8 @@ from symfile.edgar.fetch import (
     FILING_BASE,
     fetch_many_async,
     fetch_url,
-    get_cached,
-    put_cache,
+    get_index,
+    put_index,
 )
 
 BASE = 'https://www.sec.gov/Archives/edgar'
@@ -75,8 +75,8 @@ def fetch_daily_index(
 ) -> list[Filing]:
     """Fetch daily master.idx (cached)."""
     stamp = d.strftime('%Y%m%d')
-    cache_name = f'daily.{stamp}'
-    cached = get_cached(cache_name)
+    name = f'daily.{stamp}'
+    cached = get_index(name)
     if cached:
         return _parse_master_idx(cached)
     url = DAILY_URL.format(
@@ -87,7 +87,7 @@ def fetch_daily_index(
     raw = fetch_url(url)
     if not raw:
         return []
-    put_cache(cache_name, raw)
+    put_index(name, raw)
     return _parse_master_idx(raw)
 
 
@@ -95,8 +95,8 @@ def fetch_full_index(
     year: int, quarter: int
 ) -> list[Filing]:
     """Fetch quarter master.idx (cached)."""
-    cache_name = f'full.{year}Q{quarter}'
-    cached = get_cached(cache_name)
+    name = f'full.{year}Q{quarter}'
+    cached = get_index(name)
     if cached:
         print('  (using cached index)')
         return _parse_master_idx(cached)
@@ -106,7 +106,7 @@ def fetch_full_index(
     raw = fetch_url(url)
     if not raw:
         return []
-    put_cache(cache_name, raw)
+    put_index(name, raw)
     return _parse_master_idx(raw)
 
 
