@@ -3,7 +3,10 @@ name = "symfile"
 version = "0.1.0"
 description = "SEC filing tools"
 requires-python = ">=3.13"
-dependencies = ["massive"]
+dependencies = [
+    "massive",
+    "polars>=1.39.3",
+]
 
 [tool.ruff]
 line-length = 70

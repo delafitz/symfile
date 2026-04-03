@@ -4,6 +4,7 @@ Provides load_syms() -> dict[symbol, RefRow] combining
 Polygon tickers and market data.
 """
 
+from symfile.mds.massive.cusips import load_cusips
 from symfile.mds.massive.refs import (
     RefRow,
     build_cik_map,
@@ -29,6 +30,7 @@ def load_syms(
 __all__ = [
     'RefRow',
     'build_cik_map',
+    'load_cusips',
     'load_syms',
     'load_tickers',
 ]

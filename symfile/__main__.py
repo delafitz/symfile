@@ -4,12 +4,14 @@ Usage:
     uv run python -m symfile refs
     uv run python -m symfile scan [--full] [--date YYYYMMDD]
     uv run python -m symfile tickers
+    uv run python -m symfile cusips
 
 Commands:
     refs      Build/refresh reference data cache
     scan      Scan EDGAR 144 index for block trades
               (>$25M implied value, mkt_cap >$1B)
     tickers   Load/refresh the symbol-CIK mapping
+    cusips    Build CUSIP->symbol map from 13F filings
 """
 
 import asyncio
@@ -27,6 +29,7 @@ from symfile.edgar.parse.form144 import parse_144
 from symfile.mds.syms import (
     RefRow,
     build_cik_map,
+    load_cusips,
     load_syms,
     load_tickers,
 )
@@ -191,6 +194,38 @@ def cmd_scan(args: list[str]) -> None:
         )
 
 
+def cmd_cusips() -> None:
+    from symfile.edgar.bulk13f import (
+        extract_cusips,
+        fetch_bulk_zip,
+    )
+
+    syms = load_syms()
+    universe = set(syms.keys())
+
+    all_cusips: set[str] = set()
+    for year, qtr in [(2025, 3), (2025, 4)]:
+        zp = fetch_bulk_zip(year, qtr)
+        cusips = extract_cusips(zp)
+        all_cusips.update(cusips)
+        print(
+            f'  {year}/Q{qtr}: '
+            f'{len(cusips)} cusips'
+        )
+    print(f'{len(all_cusips)} unique cusips')
+
+    mapping = load_cusips(
+        cusips=all_cusips,
+        universe=universe,
+        max_age_days=0,
+    )
+    print(
+        f'\n{len(mapping)} cusips mapped '
+        f'to {len(set(mapping.values()))} '
+        f'symbols in universe'
+    )
+
+
 def main() -> None:
     args = sys.argv[1:]
     if not args:
@@ -204,6 +239,8 @@ def main() -> None:
         cmd_refs()
     elif cmd == 'scan':
         cmd_scan(args[1:])
+    elif cmd == 'cusips':
+        cmd_cusips()
     else:
         print(f'unknown command: {cmd}')
         print(__doc__)

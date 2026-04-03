@@ -21,7 +21,7 @@ DATA_DIR = (
 CACHE_DIR = DATA_DIR / 'filings'
 
 USER_AGENT = 'symfile dev@symfile.dev'
-SEC_RPS = 9
+SEC_RPS = 8
 MAX_RETRIES = 3
 FILING_BASE = 'https://www.sec.gov/Archives/'
 
