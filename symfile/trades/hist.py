@@ -24,7 +24,10 @@ from symfile.edgar.index import (
     fetch_full_index,
     filter_forms,
 )
+import re
+
 from symfile.edgar.parse.form144 import (
+    Filing144,
     parse_144,
 )
 from symfile.edgar.parse.reg import (
@@ -37,6 +40,74 @@ from symfile.mds.massive.refs import RefRow
 MIN_144_VALUE = 25_000_000
 MIN_REG_VALUE = 50_000_000
 MAX_MCAP_PCT = 0.20  # reject if > 20% of mkt_cap
+MIN_BLOCK_PCT = 0.01  # >= 1% of outstanding
+
+# Comp-sale nature keywords (case-insensitive)
+_COMP_RE = re.compile(
+    r'restricted|RSU|PSU|option|vest|compensation'
+    r'|comp|award|grant|stock plan|bonus|SAR|LTIP'
+    r'|PRSU|MIP|employee stock|incentive|director'
+    r'|board|exercis|RPUS|cashless|ESPP',
+    re.IGNORECASE,
+)
+
+# Institutional broker patterns
+_INST_BROKER_RE = re.compile(
+    r'Goldman Sachs & Co'
+    r'|Morgan Stanley & Co'
+    r'|J\.?P\.? ?Morgan Securities'
+    r'|BofA Securities'
+    r'|Barclays Capital'
+    r'|Citigroup Global'
+    r'|RBC Capital'
+    r'|Jefferies LLC'
+    r'|UBS Securities'
+    r'|Deutsche Bank Securities'
+    r'|BMO Capital',
+    re.IGNORECASE,
+)
+
+# Retail/wealth broker markers (disqualify)
+_RETAIL_RE = re.compile(
+    r'Smith Barney|Executive Financial'
+    r'|Fidelity|Schwab|Pershing'
+    r'|Merrill Lynch|E\*TRADE|Vanguard'
+    r'|TD Ameritrade|Interactive Brokers',
+    re.IGNORECASE,
+)
+
+
+def _flag_144_block(
+    d: Filing144,
+) -> bool:
+    """Heuristic: is this 144 filing a block trade?
+
+    Signals (any two = flagged):
+      - institutional broker (not retail/wealth)
+      - nature is NOT comp (RSU/option/vest/etc.)
+      - shares >= 1% of outstanding
+    """
+    score = 0
+
+    # Broker signal
+    if d.broker:
+        if _RETAIL_RE.search(d.broker):
+            pass  # retail = 0
+        elif _INST_BROKER_RE.search(d.broker):
+            score += 1
+
+    # Nature signal
+    if d.nature and not _COMP_RE.search(d.nature):
+        score += 1
+
+    # Size signal (% of outstanding)
+    if (
+        d.outstanding > 0
+        and d.shares / d.outstanding >= MIN_BLOCK_PCT
+    ):
+        score += 1
+
+    return score >= 2
 
 
 @dataclass
@@ -52,8 +123,11 @@ class Trade:
     relationship: str  # 144: rel, reg: SEC|PRI
     underwriter: str
     mkt_cap: float
-    is_bought: bool = False
+    flagged_block: bool = False
     is_ipo: bool = False
+    # 144 detail (preserved)
+    nature: str = ''
+    pct_outstanding: float = 0.0
 
 
 def _quarters(
@@ -115,6 +189,11 @@ def _scan_144(
         implied = d.shares * ref.price
         if implied < MIN_144_VALUE:
             return
+        pct = (
+            d.shares / d.outstanding
+            if d.outstanding > 0
+            else 0.0
+        )
         trades.append(
             Trade(
                 symbol=ref.symbol,
@@ -128,6 +207,9 @@ def _scan_144(
                 relationship=d.relationship,
                 underwriter=d.broker,
                 mkt_cap=ref.mkt_cap,
+                flagged_block=_flag_144_block(d),
+                nature=d.nature,
+                pct_outstanding=pct,
             )
         )
 
@@ -205,7 +287,7 @@ def _scan_reg(
                 ),
                 underwriter=d.underwriter,
                 mkt_cap=ref.mkt_cap,
-                is_bought=d.is_bought,
+                flagged_block=d.is_bought,
                 is_ipo=d.is_ipo,
             )
         )
