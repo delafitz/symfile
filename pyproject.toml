@@ -6,7 +6,11 @@ requires-python = ">=3.13"
 dependencies = [
     "massive",
     "polars>=1.39.3",
+    "typer>=0.24.1",
 ]
+
+[project.scripts]
+symfile = "symfile.__main__:app"
 
 [tool.ruff]
 line-length = 70
