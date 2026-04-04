@@ -204,6 +204,7 @@ def backfill_13d() -> None:
         SCHEMA,
         TABLE_PATH,
     )
+    from symfile.mds.syms import load_cusips
     from symfile.util.log import log
 
     cusip_map = load_cusips()
