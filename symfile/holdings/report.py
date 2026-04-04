@@ -6,6 +6,7 @@ from symfile.holdings.build import (
     load_effective,
 )
 from symfile.mds.syms import load_syms
+from symfile.util.names import short_name
 
 
 def _shares_out(ref) -> int:
@@ -103,7 +104,7 @@ def top_holders(
     print('-' * 75)
 
     for row in top.iter_rows(named=True):
-        holder = row['holder'][:34]
+        holder = short_name(row['holder'])[:34]
         pos = row['shares'] / 1e6
         chg = row['chg'] / 1e6
         pct = (
@@ -193,7 +194,7 @@ def _print_movers(
         for row in adds.iter_rows(named=True):
             chg = row['chg'] / 1e6
             print(
-                f'{row["holder"][:34]:<35s} '
+                f'{short_name(row["holder"])[:34]:<35s} '
                 f'{_row_date(row):>10s} '
                 f'{chg:>+10.1f}'
                 f'{_row_tag(row)}'
@@ -213,7 +214,7 @@ def _print_movers(
             if not tag and row['shares'] == 0:
                 tag = ' EXIT'
             print(
-                f'{row["holder"][:34]:<35s} '
+                f'{short_name(row["holder"])[:34]:<35s} '
                 f'{_row_date(row):>10s} '
                 f'{chg:>+10.1f}'
                 f'{tag}'
