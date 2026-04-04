@@ -186,6 +186,99 @@ def scan(
 
 
 @app.command()
+def backfill_13d() -> None:
+    """Backfill 13D table from full indices."""
+    import asyncio
+
+    import polars as pl
+
+    from symfile.edgar.index import (
+        fetch_filings_async,
+        fetch_full_index,
+    )
+    from symfile.edgar.parse.schedule13d import (
+        parse_13d,
+    )
+    from symfile.holdings.schedule13d import (
+        HOLDINGS_DIR,
+        SCHEMA,
+        TABLE_PATH,
+    )
+    from symfile.util.log import log
+
+    cusip_map = load_cusips()
+    rows: list[dict] = []
+
+    quarters = [
+        (2024, 1), (2024, 2),
+        (2024, 3), (2024, 4),
+        (2025, 1), (2025, 2),
+        (2025, 3), (2025, 4),
+        (2026, 1), (2026, 2),
+    ]
+
+    for year, qtr in quarters:
+        idx = fetch_full_index(year, qtr)
+        d13 = [
+            f for f in idx
+            if f.form_type.startswith(
+                'SCHEDULE 13D'
+            )
+            or f.form_type.startswith('SC 13D')
+        ]
+        log.info(
+            'backfill quarter',
+            year=year,
+            qtr=qtr,
+            filings=len(d13),
+        )
+        before = len(rows)
+
+        def on_filing(f, raw):
+            d = parse_13d(raw)
+            if not d:
+                return
+            sym = cusip_map.get(d.issuer_cusip)
+            if not sym:
+                return
+            rows.append({
+                'symbol': sym,
+                'holder': d.holder,
+                'holder_cik': d.holder_cik,
+                'event_date': d.event_date,
+                'filing_date': f.date_filed,
+                'shares': d.shares,
+                'pct_class': d.pct_class,
+            })
+
+        asyncio.run(
+            fetch_filings_async(d13, on_filing)
+        )
+        log.info(
+            'quarter done',
+            new_rows=len(rows) - before,
+            total=len(rows),
+        )
+
+    df = pl.DataFrame(rows, schema=SCHEMA)
+
+    deduped = (
+        df.sort('filing_date', descending=True)
+        .group_by(['holder_cik', 'symbol'])
+        .first()
+    )
+
+    HOLDINGS_DIR.mkdir(parents=True, exist_ok=True)
+    deduped.write_parquet(TABLE_PATH)
+    log.info(
+        'backfill complete',
+        rows=deduped.height,
+        symbols=deduped.n_unique('symbol'),
+        holders=deduped.n_unique('holder'),
+    )
+
+
+@app.command()
 def serve(
     port: Annotated[
         int, typer.Option(help='Port')
