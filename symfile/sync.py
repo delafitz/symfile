@@ -38,7 +38,12 @@ from symfile.util.dates import (
 )
 from symfile.util.log import log
 
-WATCHED_FORMS = ('144', '13F-HR/A')
+WATCHED_FORMS = (
+    '144',
+    '13F-HR/A',
+    'SCHEDULE 13D',
+    'SC 13D',
+)
 
 
 def init_mds() -> dict:
