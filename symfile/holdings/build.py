@@ -14,6 +14,7 @@ import polars as pl
 
 from symfile.edgar.bulk13f import fetch_bulk_zip
 from symfile.mds import DATA_DIR as MDS_DIR
+from symfile.util.log import log
 
 HOLDINGS_DIR = (
     Path(MDS_DIR).parent / 'holdings'
@@ -34,7 +35,7 @@ def build_quarter(
     """Build holdings parquet for one quarter."""
     out = _parquet_path(year, qtr)
     if out.exists():
-        print(f'  {out.name} exists, skipping')
+        log.debug('holdings cached', file=out.name)
         return out
 
     zp = fetch_bulk_zip(year, qtr)
@@ -114,10 +115,7 @@ def build_quarter(
 
     HOLDINGS_DIR.mkdir(parents=True, exist_ok=True)
     df.write_parquet(out)
-    print(
-        f'  {out.name}: {df.height:,} rows, '
-        f'{out.stat().st_size / 1e6:.1f} MB'
-    )
+    log.info('built holdings', file=out.name, rows=df.height, mb=round(out.stat().st_size / 1e6, 1))
     return out
 
 

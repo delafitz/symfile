@@ -37,6 +37,7 @@ from symfile.edgar.parse.reg import (
     parse_reg,
 )
 from symfile.mds.massive.refs import RefRow
+from symfile.util.log import log
 
 MIN_144_VALUE = 25_000_000
 MIN_REG_VALUE = 50_000_000
@@ -364,7 +365,7 @@ def get_trades(
     all_reg: list[Trade] = []
 
     for year, qtr in quarters(start, end):
-        print(f'Q{qtr} {year}...', end='', flush=True)
+        log.info('scanning quarter', year=year, qtr=qtr)
         filings = fetch_full_index(year, qtr)
 
         if types in ('144', 'both'):
@@ -377,8 +378,7 @@ def get_trades(
             )
             all_reg.extend(treg)
 
-        n = len(all_144) + len(all_reg)
-        print(f' {n} trades')
+        log.info('quarter complete', year=year, qtr=qtr, trades=len(all_144) + len(all_reg))
 
     # Dedupe
     if types in ('144', 'both'):

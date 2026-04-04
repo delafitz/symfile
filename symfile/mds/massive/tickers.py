@@ -11,6 +11,7 @@ from pathlib import Path
 
 from symfile.mds import DATA_DIR
 from symfile.mds.massive.session import get_client
+from symfile.util.log import log
 
 MAX_AGE_DAYS = 30
 
@@ -70,7 +71,7 @@ def _save(rows: list[dict]) -> Path:
         )
         w.writeheader()
         w.writerows(rows)
-    print(f'saved {len(rows)} tickers to {path}')
+    log.info('saved tickers', count=len(rows), path=str(path))
     return path
 
 
@@ -88,17 +89,15 @@ def load_tickers(
 
     if cached and cached[1] >= cutoff:
         path = cached[0]
-        print(
-            f'using cached tickers from {path.name}'
-        )
+        log.debug('cached tickers', file=path.name)
         result = {}
         with open(path) as f:
             for row in csv.DictReader(f):
                 result[row['symbol']] = row
-        print(f'  {len(result)} symbols with CIK')
+        log.info('tickers loaded', count=len(result))
         return result
 
-    print('fetching tickers from Polygon...')
+    log.info('fetching tickers')
     rows = _fetch_tickers()
     _save(rows)
     return {r['symbol']: r for r in rows}

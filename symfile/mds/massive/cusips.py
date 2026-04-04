@@ -16,6 +16,7 @@ from pathlib import Path
 
 from symfile.mds import DATA_DIR
 from symfile.mds.massive.session import get_client
+from symfile.util.log import log
 
 MAX_AGE_DAYS = 30
 CONCURRENCY = 20
@@ -76,10 +77,7 @@ async def _fetch_cusips_async(
                 async with lock:
                     done += 1
                     if done % 500 == 0:
-                        print(
-                            f'  {done}/{total}'
-                            f' ({len(result)} mapped)'
-                        )
+                        log.info('cusip progress', done=done, total=total, mapped=len(result))
 
             for t in tickers:
                 sym = t.ticker
@@ -111,7 +109,7 @@ def _save(
             w.writerow(
                 {'cusip': cusip, 'symbol': sym}
             )
-    print(f'saved {len(mapping)} cusips to {path}')
+    log.info('saved cusips', count=len(mapping), path=str(path))
     return path
 
 
@@ -140,26 +138,18 @@ def load_cusips(
 
     if cached and cached[1] >= cutoff:
         path = cached[0]
-        print(
-            f'using cached cusips from {path.name}'
-        )
+        log.debug('cached cusips', file=path.name)
         result = _load_csv(path)
-        print(f'  {len(result)} mappings')
+        log.info('cusips loaded', count=len(result))
         return result
 
     if cusips is None or universe is None:
         if cached:
-            print(
-                'cusip cache stale, '
-                'returning old data'
-            )
+            log.warning('cusip cache stale')
             return _load_csv(cached[0])
         return {}
 
-    print(
-        f'resolving {len(cusips)} cusips '
-        f'against {len(universe)} symbols...'
-    )
+    log.info('resolving cusips', cusips=len(cusips), universe=len(universe))
     mapping = asyncio.run(
         _fetch_cusips_async(cusips, universe)
     )

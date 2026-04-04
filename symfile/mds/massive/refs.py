@@ -17,6 +17,7 @@ from pathlib import Path
 
 from symfile.mds import DATA_DIR
 from symfile.mds.massive.session import get_client
+from symfile.util.log import log
 
 MAX_AGE_DAYS = 7
 MIN_MKT_CAP = 1_000_000_000
@@ -56,7 +57,7 @@ async def _fetch_refs_async(
     client = get_client()
 
     # Phase 1: bulk snapshot for prices (one call)
-    print('phase 1: snapshots...')
+    log.info('fetching snapshots')
     snaps = await asyncio.to_thread(
         client.get_snapshot_all, 'stocks'
     )
@@ -69,7 +70,7 @@ async def _fetch_refs_async(
             p = s.prev_day.close
         if p:
             prices[s.ticker] = p
-    print(f'  {len(prices)} prices')
+    log.info('snapshots loaded', count=len(prices))
 
     # Build candidate list: CS + CIK + has price
     candidates = [
@@ -79,11 +80,7 @@ async def _fetch_refs_async(
         and info.get('cik')
         and sym in prices
     ]
-    print(
-        f'phase 2: details for '
-        f'{len(candidates)} symbols '
-        f'(concurrency={CONCURRENCY})...'
-    )
+    log.info('fetching details', count=len(candidates), concurrency=CONCURRENCY)
 
     # Phase 2: async ticker details with semaphore
     sem = asyncio.Semaphore(CONCURRENCY)
@@ -117,17 +114,12 @@ async def _fetch_refs_async(
                 rows.append(ref)
                 done += 1
                 if done % 100 == 0:
-                    print(
-                        f'  {done} qualifying...'
-                    )
+                    log.info('details progress', done=done)
 
     await asyncio.gather(
         *(fetch_one(s) for s in candidates)
     )
-    print(
-        f'  {len(rows)} symbols with '
-        f'mkt_cap >= ${MIN_MKT_CAP / 1e9:.0f}B'
-    )
+    log.info('details complete', count=len(rows), min_mkt_cap=MIN_MKT_CAP)
     return rows
 
 
@@ -154,7 +146,7 @@ def _save(rows: list[RefRow]) -> Path:
                     'price': r.price,
                 }
             )
-    print(f'saved {len(rows)} refs to {path}')
+    log.info('saved refs', count=len(rows), path=str(path))
     return path
 
 
@@ -184,11 +176,9 @@ def load_refs(
 
     if cached and cached[1] >= cutoff:
         path = cached[0]
-        print(
-            f'using cached refs from {path.name}'
-        )
+        log.debug('cached refs', file=path.name)
         result = _load_csv(path)
-        print(f'  {len(result)} symbols')
+        log.info('refs loaded', count=len(result))
         return result
 
     if tickers is None:
@@ -198,7 +188,7 @@ def load_refs(
 
         tickers = load_tickers()
 
-    print('building refs...')
+    log.info('building refs')
     rows = asyncio.run(_fetch_refs_async(tickers))
     _save(rows)
     return {r.symbol: r for r in rows}

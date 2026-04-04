@@ -29,24 +29,21 @@ from symfile.util.dates import (
     quarter,
     weekdays,
 )
+from symfile.util.log import log
 
 WATCHED_FORMS = ('144', '13F-HR/A')
 
 
 def init_mds() -> dict:
     """Ensure all market data caches are fresh."""
-    print('=== init mds ===')
+    log.info('init mds')
     tickers = load_tickers()
     syms = load_syms()
     cusip_map = load_cusips()
 
-    print(
-        f'  {len(tickers)} tickers, '
-        f'{len(syms)} syms, '
-        f'{len(cusip_map)} cusips'
-    )
+    log.info('mds loaded', tickers=len(tickers), syms=len(syms), cusips=len(cusip_map))
 
-    print('=== init holdings ===')
+    log.info('init holdings')
     build_all(cusip_map)
 
     return {
@@ -94,15 +91,12 @@ def sync(
     qtr = quarter(today)
     year = today.year
 
-    print(f'=== sync (today={today}) ===')
+    log.info('sync', today=str(today))
 
     all_filings: list[Filing] = []
 
     if last is None or quarter(last) != qtr:
-        print(
-            f'  no dailies for {year}/Q{qtr}, '
-            f'fetching full index...'
-        )
+        log.info('fetching full index', year=year, qtr=qtr)
         full = fetch_full_index(year, qtr)
         watched = [
             f
@@ -132,13 +126,10 @@ def sync(
 
     if last == today:
         days = [today]
-        print('  re-fetching today\'s daily')
+        log.info('re-fetching daily', date=str(today))
 
     if days:
-        print(
-            f'  fetching {len(days)} daily '
-            f'indices ({days[0]} to {days[-1]})'
-        )
+        log.info('fetching dailies', count=len(days), start=str(days[0]), end=str(days[-1]))
 
     for d in days:
         filings = fetch_daily_index(d)
@@ -158,10 +149,7 @@ def sync(
         if get_cached(f.filename) is None
     ]
 
-    print(
-        f'  {len(all_filings)} watched filings, '
-        f'{len(new)} unfetched'
-    )
+    log.info('sync complete', watched=len(all_filings), unfetched=len(new))
 
     if new and callback:
         import asyncio

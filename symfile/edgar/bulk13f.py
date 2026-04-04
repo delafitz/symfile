@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from symfile.edgar.fetch import USER_AGENT
+from symfile.util.log import log
 
 BASE_URL = (
     'https://www.sec.gov/files/structureddata'
@@ -71,11 +72,11 @@ def fetch_bulk_zip(
     """Download quarterly 13F zip (cached)."""
     path = _cache_path(year, quarter)
     if path.exists():
-        print(f'using cached {path.name}')
+        log.debug('cached bulk zip', file=path.name)
         return path
 
     url = _zip_url(year, quarter)
-    print(f'downloading {url}...')
+    log.info('downloading bulk zip', url=url)
     req = urllib.request.Request(
         url, headers={'User-Agent': USER_AGENT}
     )
@@ -83,7 +84,7 @@ def fetch_bulk_zip(
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     path.write_bytes(resp.read())
     mb = path.stat().st_size / 1e6
-    print(f'  saved {path.name} ({mb:.0f} MB)')
+    log.info('saved bulk zip', file=path.name, mb=round(mb))
     return path
 
 

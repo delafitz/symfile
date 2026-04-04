@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, TypeVar
 
+from symfile.util.log import log
+
 DATA_DIR = (
     Path(__file__).resolve().parent.parent.parent
     / 'data'
@@ -53,7 +55,7 @@ def fetch_url(url: str) -> bytes | None:
             req, timeout=30
         ).read()
     except Exception as e:
-        print(f'  fetch error: {url}: {e}')
+        log.warning('fetch error', url=url, err=str(e))
         return None
 
 
@@ -86,19 +88,18 @@ def fetch_url_retry(url: str) -> bytes | None:
                 _backoff_until = (
                     time.time() + BACKOFF_SECS
                 )
-                print(
-                    f'\n  429 — SEC rate limit. '
-                    f'sleeping {BACKOFF_SECS}s '
-                    f'(all threads paused)'
+                log.warning(
+                    '429 backoff',
+                    seconds=BACKOFF_SECS,
                 )
                 time.sleep(BACKOFF_SECS)
                 continue
             if e.code == 429:
                 return None
-            print(f'  fetch error: {url}: {e}')
+            log.warning('fetch error', url=url, err=str(e))
             return None
         except Exception as e:
-            print(f'  fetch error: {url}: {e}')
+            log.warning('fetch error', url=url, err=str(e))
             return None
 
 
@@ -192,11 +193,11 @@ async def fetch_many_async(
 
     cached_n = len(items) - len(to_fetch)
     if cached_n:
-        print(f'  {cached_n} from cache')
+        log.info('cache hit', count=cached_n)
     if not to_fetch:
         return
 
-    print(f'  {len(to_fetch)} to fetch...')
+    log.info('fetching', count=len(to_fetch))
     bucket = asyncio.Queue(maxsize=SEC_RPS)
     done = 0
     failed = 0
@@ -221,10 +222,12 @@ async def fetch_many_async(
         )
         done += 1
         if done % 500 == 0:
-            msg = f'  ... {done}/{total}'
-            if failed:
-                msg += f' ({failed} failed)'
-            print(msg)
+            log.info(
+                'progress',
+                done=done,
+                total=total,
+                failed=failed,
+            )
         if raw:
             put_cache(key_fn(item), raw)
             callback(item, raw)
@@ -242,4 +245,8 @@ async def fetch_many_async(
     finally:
         filler.cancel()
     if failed:
-        print(f'  {failed}/{total} failed')
+        log.warning(
+            'fetch incomplete',
+            failed=failed,
+            total=total,
+        )

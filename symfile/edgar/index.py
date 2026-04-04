@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from symfile.util.dates import quarter as _quarter
+from symfile.util.log import log
 
 from symfile.edgar.fetch import (
     FILING_BASE,
@@ -96,7 +97,7 @@ def fetch_full_index(
     name = f'full.{year}Q{quarter}'
     cached = get_index(name)
     if cached:
-        print('  (using cached index)')
+        log.debug('cached index', name=name)
         return _parse_master_idx(cached)
     url = FULL_URL.format(
         year=year, qtr=quarter
