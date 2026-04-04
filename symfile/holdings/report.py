@@ -115,15 +115,21 @@ def top_holders(
             row['prev_shares'] == 0
             and not row['is_13d']
         )
-        if new:
-            chg_str = 'NEW'
-        elif row['is_13d']:
+        if row['is_13d']:
+            date_str = row['filing_date']
             chg_str = f'{chg:>+8.1f}*'
         else:
-            chg_str = f'{chg:>+10.1f}'
+            date_str = (
+                f'Q{curr_q} {curr_y}'
+            )
+            chg_str = (
+                'NEW'
+                if new
+                else f'{chg:>+10.1f}'
+            )
         print(
             f'{holder:<35s} '
-            f'{row["filing_date"]:>10s} '
+            f'{date_str:>10s} '
             f'{pos:>10.1f} '
             f'{pct:>5.1f}%'
             f'{chg_str:>10s}'
@@ -142,11 +148,15 @@ def top_holders(
         f'{chg:>+10.1f}'
     )
 
-    _print_movers(merged, n)
+    _print_movers(
+        merged, n, f'Q{curr_q} {curr_y}'
+    )
 
 
 def _print_movers(
-    merged: pl.DataFrame, n: int
+    merged: pl.DataFrame,
+    n: int,
+    qtr_label: str,
 ) -> None:
     """Print top adds and subtracts."""
     adds = (
@@ -160,6 +170,18 @@ def _print_movers(
         .head(n)
     )
 
+    def _row_tag(row):
+        if row['is_13d']:
+            return ' 13D'
+        if row['prev_shares'] == 0:
+            return ' NEW'
+        return ''
+
+    def _row_date(row):
+        if row['is_13d']:
+            return row['filing_date']
+        return qtr_label
+
     if adds.height > 0:
         print(f'\nTop adds:')
         print(
@@ -170,13 +192,11 @@ def _print_movers(
         print('-' * 58)
         for row in adds.iter_rows(named=True):
             chg = row['chg'] / 1e6
-            new = row['prev_shares'] == 0
-            tag = ' NEW' if new else ''
             print(
                 f'{row["holder"][:34]:<35s} '
-                f'{row["filing_date"]:>10s} '
+                f'{_row_date(row):>10s} '
                 f'{chg:>+10.1f}'
-                f'{tag}'
+                f'{_row_tag(row)}'
             )
 
     if subs.height > 0:
@@ -189,11 +209,12 @@ def _print_movers(
         print('-' * 58)
         for row in subs.iter_rows(named=True):
             chg = row['chg'] / 1e6
-            exit = row['shares'] == 0
-            tag = ' EXIT' if exit else ''
+            tag = _row_tag(row)
+            if not tag and row['shares'] == 0:
+                tag = ' EXIT'
             print(
                 f'{row["holder"][:34]:<35s} '
-                f'{row["filing_date"]:>10s} '
+                f'{_row_date(row):>10s} '
                 f'{chg:>+10.1f}'
                 f'{tag}'
             )
