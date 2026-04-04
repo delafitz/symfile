@@ -5,6 +5,7 @@ sync()      — catch up on daily indices and fetch
               new filings (144, 13F-HR/A, reg)
 """
 
+import asyncio
 import re
 from datetime import date, timedelta
 
@@ -18,7 +19,13 @@ from symfile.edgar.index import (
     fetch_filings_async,
     fetch_full_index,
 )
-from symfile.holdings.build import build_all
+from symfile.edgar.parse.form13f import (
+    parse_13f_holdings,
+)
+from symfile.holdings.build import (
+    build_all,
+    upsert_amendment,
+)
 from symfile.mds.syms import (
     load_cusips,
     load_syms,
@@ -71,8 +78,53 @@ def _last_daily() -> date | None:
     return best
 
 
+def _prior_quarter(
+    d: date,
+) -> tuple[int, int]:
+    """Quarter whose holdings this amendment
+    covers. Amendments filed in Q are for Q-1."""
+    q = quarter(d)
+    y = d.year
+    q -= 1
+    if q == 0:
+        q = 4
+        y -= 1
+    return y, q
+
+
+def _process_13f_amendment(
+    filing: Filing,
+    raw: bytes,
+    cusip_map: dict[str, str],
+) -> None:
+    """Parse + upsert a 13F-HR/A filing."""
+    holdings = parse_13f_holdings(raw)
+    if not holdings:
+        return
+
+    mapped = [
+        (cusip_map[h.cusip], h.shares)
+        for h in holdings
+        if h.cusip in cusip_map
+    ]
+    if not mapped:
+        return
+
+    filed = date.fromisoformat(filing.date_filed)
+    y, q = _prior_quarter(filed)
+
+    upsert_amendment(
+        y,
+        q,
+        filing.company,
+        filing.date_filed,
+        mapped,
+    )
+
+
 def sync(
     callback=None,
+    cusip_map: dict[str, str] | None = None,
 ) -> list[Filing]:
     """Catch up on filings since last sync.
 
@@ -151,11 +203,42 @@ def sync(
 
     log.info('sync complete', watched=len(all_filings), unfetched=len(new))
 
-    if new and callback:
-        import asyncio
+    if not new:
+        return new
 
+    if cusip_map is None:
+        cusip_map = load_cusips()
+
+    amend_filings = [
+        f for f in new
+        if f.form_type == '13F-HR/A'
+    ]
+    other_filings = [
+        f for f in new
+        if f.form_type != '13F-HR/A'
+    ]
+
+    if amend_filings:
+        def on_amend(f, raw):
+            _process_13f_amendment(
+                f, raw, cusip_map
+            )
+
+        log.info(
+            'processing amendments',
+            count=len(amend_filings),
+        )
         asyncio.run(
-            fetch_filings_async(new, callback)
+            fetch_filings_async(
+                amend_filings, on_amend
+            )
+        )
+
+    if other_filings and callback:
+        asyncio.run(
+            fetch_filings_async(
+                other_filings, callback
+            )
         )
 
     return new

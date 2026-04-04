@@ -266,3 +266,51 @@ def load_effective(
     )
 
     return pl.concat([base_kept, amends])
+
+
+def upsert_amendment(
+    year: int,
+    qtr: int,
+    holder: str,
+    filing_date: str,
+    holdings: list[tuple[str, int]],
+) -> None:
+    """Upsert a single filer's amendment.
+
+    holdings: list of (symbol, shares) tuples.
+    Replaces any existing rows for this holder.
+    """
+    existing = load_amendments(year, qtr)
+
+    new_rows = pl.DataFrame(
+        {
+            'symbol': [h[0] for h in holdings],
+            'filing_date': [filing_date]
+            * len(holdings),
+            'holder': [holder] * len(holdings),
+            'shares': [h[1] for h in holdings],
+        },
+        schema={
+            'symbol': pl.Utf8,
+            'filing_date': pl.Utf8,
+            'holder': pl.Utf8,
+            'shares': pl.Int64,
+        },
+    )
+
+    kept = existing.filter(
+        pl.col('holder') != holder
+    )
+    merged = pl.concat([kept, new_rows])
+
+    out = _amends_path(year, qtr)
+    HOLDINGS_DIR.mkdir(
+        parents=True, exist_ok=True
+    )
+    merged.write_parquet(out)
+    log.info(
+        'upserted amendment',
+        holder=holder,
+        date=filing_date,
+        positions=len(holdings),
+    )
