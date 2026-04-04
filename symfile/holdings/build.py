@@ -12,6 +12,7 @@ Stored at data/holdings/YYYYQN.parquet
 
 import io
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -241,31 +242,146 @@ def load_amendments(
     return pl.read_parquet(p)
 
 
+def _quarter_end(
+    year: int, qtr: int
+) -> str:
+    """Quarter-end date as YYYY-MM-DD."""
+    ends = {1: '03-31', 2: '06-30',
+            3: '09-30', 4: '12-31'}
+    return f'{year}-{ends[qtr]}'
+
+
 def load_effective(
     year: int, qtr: int
 ) -> pl.DataFrame:
-    """Load base + overlay amendments.
+    """Load base + overlay amendments + 13D.
 
-    For holders with amendments, replaces base
-    rows with amendment rows.
+    Layer 1: base 13F-HR originals
+    Layer 2: 13F-HR/A amendments (full replace
+             per holder)
+    Layer 3: 13D positions (per holder+symbol,
+             only where 13D event is after the
+             quarter end and after the 13F date)
     """
     base = load_quarter(year, qtr)
     amends = load_amendments(year, qtr)
 
-    if amends.height == 0:
-        return base
+    if amends.height > 0:
+        amended_holders = amends.select(
+            'holder'
+        ).unique()
+        base = base.join(
+            amended_holders,
+            on='holder',
+            how='anti',
+        )
+        base = pl.concat([base, amends])
 
-    amended_holders = amends.select(
-        'holder'
-    ).unique()
+    next_qtr_path = _parquet_path(
+        year + (1 if qtr == 4 else 0),
+        1 if qtr == 4 else qtr + 1,
+    )
+    is_latest = not next_qtr_path.exists()
 
-    base_kept = base.join(
-        amended_holders,
-        on='holder',
+    if is_latest:
+        qe = _quarter_end(year, qtr)
+        base = _overlay_13d(base, qe)
+
+    return base
+
+
+def _to_iso(s: str) -> str:
+    """Convert various date formats to
+    YYYY-MM-DD for comparison."""
+    from datetime import datetime
+
+    for fmt in (
+        '%m/%d/%Y',
+        '%d-%b-%Y',
+        '%Y-%m-%d',
+    ):
+        try:
+            return datetime.strptime(
+                s, fmt
+            ).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return s
+
+
+def _overlay_13d(
+    holdings: pl.DataFrame,
+    quarter_end: str,
+) -> pl.DataFrame:
+    """Overlay 13D positions where more recent.
+
+    Only applies 13D events that are AFTER the
+    quarter end date AND after the holder's 13F
+    filing date for that symbol.
+    """
+    from symfile.holdings.aliases import (
+        build_matcher,
+    )
+    from symfile.holdings.schedule13d import (
+        load_13d,
+    )
+
+    d13 = load_13d()
+    if d13.height == 0:
+        return holdings
+
+    holders_13f = (
+        holdings['holder'].unique().to_list()
+    )
+    match = build_matcher(holders_13f)
+
+    updates: list[dict] = []
+    for row in d13.iter_rows(named=True):
+        f_name = match(row['holder'])
+        if not f_name:
+            continue
+
+        sym = row['symbol']
+        existing = holdings.filter(
+            (pl.col('holder') == f_name)
+            & (pl.col('symbol') == sym)
+        )
+        if existing.height == 0:
+            continue
+
+        f_date = _to_iso(
+            existing['filing_date'].max()
+        )
+        e_date = _to_iso(row['event_date'])
+
+        if e_date > quarter_end and e_date > f_date:
+            updates.append({
+                'symbol': sym,
+                'filing_date': e_date,
+                'holder': f_name,
+                'shares': row['shares'],
+            })
+
+    if not updates:
+        return holdings
+
+    upd = pl.DataFrame(updates, schema={
+        'symbol': pl.Utf8,
+        'filing_date': pl.Utf8,
+        'holder': pl.Utf8,
+        'shares': pl.Int64,
+    }).select(
+        'symbol', 'filing_date',
+        'holder', 'shares',
+    )
+
+    kept = holdings.join(
+        upd.select('holder', 'symbol'),
+        on=['holder', 'symbol'],
         how='anti',
     )
 
-    return pl.concat([base_kept, amends])
+    return pl.concat([kept, upd])
 
 
 def upsert_amendment(
