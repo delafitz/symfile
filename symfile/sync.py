@@ -143,12 +143,20 @@ def sync(
     qtr = quarter(today)
     year = today.year
 
-    log.info('sync', today=str(today))
+    log.info(
+        'sync',
+        today=str(today),
+        last_daily=str(last) if last else None,
+    )
 
     all_filings: list[Filing] = []
 
     if last is None or quarter(last) != qtr:
-        log.info('fetching full index', year=year, qtr=qtr)
+        log.info(
+            'cold start — fetching full index',
+            year=year,
+            qtr=qtr,
+        )
         full = fetch_full_index(year, qtr)
         watched = [
             f
@@ -160,7 +168,9 @@ def sync(
         ]
         all_filings.extend(watched)
         if full:
-            dates = set(f.date_filed for f in full)
+            dates = set(
+                f.date_filed for f in full
+            )
             earliest = min(dates)
             d = date(
                 int(earliest[:4]),
@@ -178,10 +188,14 @@ def sync(
 
     if last == today:
         days = [today]
-        log.info('re-fetching daily', date=str(today))
 
     if days:
-        log.info('fetching dailies', count=len(days), start=str(days[0]), end=str(days[-1]))
+        log.info(
+            'fetching dailies',
+            days=len(days),
+            start=str(days[0]),
+            end=str(days[-1]),
+        )
 
     for d in days:
         filings = fetch_daily_index(d)
@@ -194,6 +208,25 @@ def sync(
             )
         ]
         all_filings.extend(watched)
+        if watched:
+            from collections import Counter
+
+            by_type = Counter(
+                f.form_type for f in watched
+            )
+            log.info(
+                'daily',
+                date=str(d),
+                filings=dict(by_type),
+            )
+
+    seen = set()
+    unique: list[Filing] = []
+    for f in all_filings:
+        if f.filename not in seen:
+            seen.add(f.filename)
+            unique.append(f)
+    all_filings = unique
 
     new = [
         f
@@ -201,7 +234,15 @@ def sync(
         if get_cached(f.filename) is None
     ]
 
-    log.info('sync complete', watched=len(all_filings), unfetched=len(new))
+    from collections import Counter
+
+    by_type = Counter(f.form_type for f in new)
+    log.info(
+        'sync summary',
+        total_watched=len(all_filings),
+        to_fetch=len(new),
+        by_type=dict(by_type),
+    )
 
     if not new:
         return new

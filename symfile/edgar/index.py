@@ -57,12 +57,15 @@ def _parse_master_idx(
         parts = line.split('|')
         if len(parts) != 5:
             continue
+        df = parts[3].strip()
+        if len(df) == 8 and '-' not in df:
+            df = f'{df[:4]}-{df[4:6]}-{df[6:]}'
         filings.append(
             Filing(
                 cik=parts[0].strip(),
                 company=parts[1].strip(),
                 form_type=parts[2].strip(),
-                date_filed=parts[3].strip(),
+                date_filed=df,
                 filename=parts[4].strip(),
             )
         )
