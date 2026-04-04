@@ -15,14 +15,31 @@ def _shares_out(ref) -> int:
     return 0
 
 
+def _fmt_chg(chg, is_13d, is_new):
+    if is_new:
+        return 'NEW'
+    if is_13d:
+        return f'{chg:+.2f}*'
+    return f'{chg:+.2f}'
+
+
+def _fmt_tag(is_13d, is_new, is_exit):
+    if is_13d:
+        return '13D'
+    if is_new:
+        return 'NEW'
+    if is_exit:
+        return 'EXIT'
+    return ''
+
+
 def top_holders(
     symbol: str,
     quarters: list[tuple[int, int]]
     | None = None,
     n: int = 20,
 ) -> None:
-    """Top N holders with QoQ change + pct
-    outstanding. Shows filing date per holder."""
+    """Top N holders with QoQ change."""
     if quarters is None:
         quarters = [(2025, 3), (2025, 4)]
 
@@ -34,6 +51,7 @@ def top_holders(
 
     prev_y, prev_q = quarters[0]
     curr_y, curr_q = quarters[1]
+    qtr_label = f'Q{curr_q} {curr_y}'
 
     prev = load_effective(prev_y, prev_q)
     curr = load_effective(curr_y, curr_q)
@@ -65,7 +83,9 @@ def top_holders(
         how='left',
     ).with_columns(
         pl.col('prev_shares').fill_null(0),
-        pl.when(pl.col('base_shares').is_not_null())
+        pl.when(
+            pl.col('base_shares').is_not_null()
+        )
         .then(
             pl.col('shares')
             - pl.col('base_shares')
@@ -94,64 +114,78 @@ def top_holders(
         f'Top {n} holders Q{curr_q} {curr_y}'
         f' (vs Q{prev_q})'
     )
-    print(
-        f'{"HOLDER":<35s} '
-        f'{"DATE":>10s} '
-        f'{"POS(MM)":>10s} '
-        f'{"%OUT":>6s} '
-        f'{"CHG(MM)":>10s}'
-    )
-    print('-' * 75)
 
-    for row in top.iter_rows(named=True):
-        holder = short_name(row['holder'])[:34]
-        pos = row['shares'] / 1e6
-        chg = row['chg'] / 1e6
-        pct = (
-            row['shares'] / so * 100
-            if so > 0
-            else 0
-        )
-        new = (
-            row['prev_shares'] == 0
-            and not row['is_13d']
-        )
-        if row['is_13d']:
-            date_str = row['filing_date']
-            chg_str = f'{chg:>+8.1f}*'
-        else:
-            date_str = (
-                f'Q{curr_q} {curr_y}'
+    tbl = (
+        top.with_columns(
+            pl.col('holder')
+            .map_elements(
+                lambda h: short_name(h)[:30],
+                return_dtype=pl.Utf8,
             )
-            chg_str = (
-                'NEW'
-                if new
-                else f'{chg:>+10.1f}'
-            )
-        print(
-            f'{holder:<35s} '
-            f'{date_str:>10s} '
-            f'{pos:>10.1f} '
-            f'{pct:>5.1f}%'
-            f'{chg_str:>10s}'
+            .alias('name'),
+            pl.when(pl.col('is_13d'))
+            .then(pl.col('filing_date'))
+            .otherwise(pl.lit(qtr_label))
+            .alias('date'),
+            (
+                pl.col('shares').cast(pl.Float64)
+                / 1e6
+            ).alias('pos'),
+            (
+                pl.col('shares').cast(pl.Float64)
+                / so
+                * 100
+            ).alias('pct'),
+            (
+                pl.col('chg').cast(pl.Float64)
+                / 1e6
+            ).alias('chg_mm'),
         )
+        .select(
+            pl.col('name'),
+            pl.col('date'),
+            pl.col('pos').round(2),
+            pl.col('pct').round(1),
+            pl.struct(
+                'chg_mm', 'is_13d', 'prev_shares'
+            )
+            .map_elements(
+                lambda s: _fmt_chg(
+                    s['chg_mm'],
+                    s['is_13d'],
+                    s['prev_shares'] == 0
+                    and not s['is_13d'],
+                ),
+                return_dtype=pl.Utf8,
+            )
+            .alias('chg'),
+        )
+    )
 
-    total = c['shares'].sum()
-    prev_total = p['shares'].sum()
-    chg = (total - prev_total) / 1e6
-    pct = total / so * 100 if so > 0 else 0
-    print('-' * 75)
+    with pl.Config(
+        tbl_formatting='NOTHING',
+        tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True,
+        tbl_hide_column_names=False,
+        tbl_rows=n + 5,
+        fmt_str_lengths=35,
+        fmt_float='full',
+        set_tbl_width_chars=80,
+    ):
+        print(tbl)
+
+    total = c['shares'].sum() / 1e6
+    prev_total = p['shares'].sum() / 1e6
+    chg = total - prev_total
+    pct = total * 1e6 / so * 100 if so else 0
     print(
-        f'{"ALL (" + str(c.height) + " holders)":<35s} '
-        f'{"":>10s} '
-        f'{total / 1e6:>10.1f} '
-        f'{pct:>5.1f}%'
-        f'{chg:>+10.1f}'
+        f'ALL ({c.height} holders)'
+        f'  pos={total:.2f}MM'
+        f'  %out={pct:.1f}%'
+        f'  chg={chg:+.2f}MM'
     )
 
-    _print_movers(
-        merged, n, f'Q{curr_q} {curr_y}'
-    )
+    _print_movers(merged, n, qtr_label)
 
 
 def _print_movers(
@@ -159,7 +193,6 @@ def _print_movers(
     n: int,
     qtr_label: str,
 ) -> None:
-    """Print top adds and subtracts."""
     adds = (
         merged.filter(pl.col('chg') > 0)
         .sort('chg', descending=True)
@@ -171,51 +204,56 @@ def _print_movers(
         .head(n)
     )
 
-    def _row_tag(row):
-        if row['is_13d']:
-            return ' 13D'
-        if row['prev_shares'] == 0:
-            return ' NEW'
-        return ''
-
-    def _row_date(row):
-        if row['is_13d']:
-            return row['filing_date']
-        return qtr_label
-
-    if adds.height > 0:
-        print(f'\nTop adds:')
-        print(
-            f'{"HOLDER":<35s} '
-            f'{"DATE":>10s} '
-            f'{"CHG(MM)":>10s}'
-        )
-        print('-' * 58)
-        for row in adds.iter_rows(named=True):
-            chg = row['chg'] / 1e6
-            print(
-                f'{short_name(row["holder"])[:34]:<35s} '
-                f'{_row_date(row):>10s} '
-                f'{chg:>+10.1f}'
-                f'{_row_tag(row)}'
+    def _build_mover_tbl(df):
+        return (
+            df.with_columns(
+                pl.col('holder')
+                .map_elements(
+                    lambda h: short_name(h)[:30],
+                    return_dtype=pl.Utf8,
+                )
+                .alias('name'),
+                pl.when(pl.col('is_13d'))
+                .then(pl.col('filing_date'))
+                .otherwise(pl.lit(qtr_label))
+                .alias('date'),
+                (
+                    pl.col('chg').cast(pl.Float64)
+                    / 1e6
+                )
+                .round(2)
+                .alias('chg_mm'),
+                pl.struct(
+                    'is_13d', 'prev_shares',
+                    'shares',
+                )
+                .map_elements(
+                    lambda s: _fmt_tag(
+                        s['is_13d'],
+                        s['prev_shares'] == 0
+                        and not s['is_13d'],
+                        s['shares'] == 0,
+                    ),
+                    return_dtype=pl.Utf8,
+                )
+                .alias('tag'),
             )
-
-    if subs.height > 0:
-        print(f'\nTop subtracts:')
-        print(
-            f'{"HOLDER":<35s} '
-            f'{"DATE":>10s} '
-            f'{"CHG(MM)":>10s}'
+            .select('name', 'date', 'chg_mm', 'tag')
         )
-        print('-' * 58)
-        for row in subs.iter_rows(named=True):
-            chg = row['chg'] / 1e6
-            tag = _row_tag(row)
-            if not tag and row['shares'] == 0:
-                tag = ' EXIT'
-            print(
-                f'{short_name(row["holder"])[:34]:<35s} '
-                f'{_row_date(row):>10s} '
-                f'{chg:>+10.1f}'
-                f'{tag}'
-            )
+
+    with pl.Config(
+        tbl_formatting='NOTHING',
+        tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True,
+        tbl_hide_column_names=False,
+        tbl_rows=n + 5,
+        fmt_str_lengths=35,
+        fmt_float='full',
+        set_tbl_width_chars=80,
+    ):
+        if adds.height > 0:
+            print('\nTop adds:')
+            print(_build_mover_tbl(adds))
+        if subs.height > 0:
+            print('\nTop subtracts:')
+            print(_build_mover_tbl(subs))
