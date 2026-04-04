@@ -199,7 +199,11 @@ def build_all(
     quarters: list[tuple[int, int]]
     | None = None,
 ) -> list[Path]:
-    """Build base + amendment parquets."""
+    """Build base + amendment parquets.
+
+    Also truncates 13D table to keep only filings
+    after the prior quarter end.
+    """
     if quarters is None:
         quarters = [(2025, 3), (2025, 4)]
     paths = []
@@ -210,6 +214,17 @@ def build_all(
         paths.append(
             build_amendments(year, qtr, cusip_map)
         )
+
+    if quarters:
+        from symfile.holdings.schedule13d import (
+            truncate,
+        )
+
+        prev_y, prev_q = quarters[-2] if len(
+            quarters
+        ) > 1 else quarters[0]
+        truncate(prev_y, prev_q)
+
     return paths
 
 
