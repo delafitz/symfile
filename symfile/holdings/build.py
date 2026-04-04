@@ -301,6 +301,12 @@ def load_effective(
     if is_latest:
         qe = _quarter_end(year, qtr)
         base = _overlay_13d(base, qe)
+    else:
+        base = base.with_columns(
+            pl.lit(None)
+            .cast(pl.Int64)
+            .alias('base_shares')
+        )
 
     return base
 
@@ -370,14 +376,22 @@ def _overlay_13d(
         e_date = _to_iso(row['event_date'])
 
         if e_date > quarter_end and e_date > f_date:
+            base_sh = existing['shares'].sum()
             updates.append({
                 'symbol': sym,
                 'filing_date': e_date,
                 'holder': f_name,
                 'shares': row['shares'],
+                'base_shares': base_sh,
             })
 
     if not updates:
+        if 'base_shares' not in holdings.columns:
+            holdings = holdings.with_columns(
+                pl.lit(None)
+                .cast(pl.Int64)
+                .alias('base_shares')
+            )
         return holdings
 
     upd = pl.DataFrame(updates, schema={
@@ -385,9 +399,10 @@ def _overlay_13d(
         'filing_date': pl.Utf8,
         'holder': pl.Utf8,
         'shares': pl.Int64,
+        'base_shares': pl.Int64,
     }).select(
         'symbol', 'filing_date',
-        'holder', 'shares',
+        'holder', 'shares', 'base_shares',
     )
 
     kept = holdings.join(
@@ -395,6 +410,12 @@ def _overlay_13d(
         on=['holder', 'symbol'],
         how='anti',
     )
+    if 'base_shares' not in kept.columns:
+        kept = kept.with_columns(
+            pl.lit(None)
+            .cast(pl.Int64)
+            .alias('base_shares')
+        )
 
     return pl.concat([kept, upd])
 

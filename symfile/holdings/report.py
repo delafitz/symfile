@@ -46,6 +46,7 @@ def top_holders(
             .agg(
                 pl.col('shares').sum(),
                 pl.col('filing_date').max(),
+                pl.col('base_shares').first(),
             )
         )
 
@@ -63,10 +64,19 @@ def top_holders(
         how='left',
     ).with_columns(
         pl.col('prev_shares').fill_null(0),
-        (
+        pl.when(pl.col('base_shares').is_not_null())
+        .then(
+            pl.col('shares')
+            - pl.col('base_shares')
+        )
+        .otherwise(
             pl.col('shares')
             - pl.col('prev_shares').fill_null(0)
-        ).alias('chg'),
+        )
+        .alias('chg'),
+        pl.col('base_shares')
+        .is_not_null()
+        .alias('is_13d'),
     )
 
     top = merged.sort(
@@ -101,12 +111,16 @@ def top_holders(
             if so > 0
             else 0
         )
-        new = row['prev_shares'] == 0
-        chg_str = (
-            'NEW'
-            if new
-            else f'{chg:>+10.1f}'
+        new = (
+            row['prev_shares'] == 0
+            and not row['is_13d']
         )
+        if new:
+            chg_str = 'NEW'
+        elif row['is_13d']:
+            chg_str = f'{chg:>+8.1f}*'
+        else:
+            chg_str = f'{chg:>+10.1f}'
         print(
             f'{holder:<35s} '
             f'{row["filing_date"]:>10s} '
