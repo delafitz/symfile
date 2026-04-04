@@ -17,6 +17,7 @@ class Filing13D:
     issuer_name: str
     event_date: str
     holder: str
+    holder_cik: str
     shares: int
     pct_class: float
 
@@ -84,6 +85,12 @@ def parse_13d(
         form_data,
         'coverPageHeader/issuerInfo/issuerCUSIP',
     )
+    if not cusip:
+        cusip = _find(
+            form_data,
+            'coverPageHeader/issuerInfo'
+            '/issuerCusips/issuerCusipNumber',
+        )
     issuer = _find(
         form_data,
         'coverPageHeader/issuerInfo/issuerName',
@@ -111,11 +118,13 @@ def parse_13d(
         return None
 
     best_name = ''
+    best_cik = ''
     best_shares = 0
     best_pct = 0.0
 
     for p in persons:
         name = _find(p, 'reportingPersonName')
+        cik = _find(p, 'reportingPersonCIK')
         shares = _parse_float(
             _find(p, 'aggregateAmountOwned')
         )
@@ -126,6 +135,7 @@ def parse_13d(
             best_shares = int(shares)
             best_pct = pct
             best_name = name
+            best_cik = cik
 
     if not best_name:
         return None
@@ -135,6 +145,7 @@ def parse_13d(
         issuer_name=issuer,
         event_date=event,
         holder=best_name,
+        holder_cik=best_cik,
         shares=best_shares,
         pct_class=best_pct,
     )

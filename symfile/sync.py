@@ -22,9 +22,15 @@ from symfile.edgar.index import (
 from symfile.edgar.parse.form13f import (
     parse_13f_holdings,
 )
+from symfile.edgar.parse.schedule13d import (
+    parse_13d,
+)
 from symfile.holdings.build import (
     build_all,
     upsert_amendment,
+)
+from symfile.holdings.schedule13d import (
+    upsert_13d,
 )
 from symfile.mds.syms import (
     load_cusips,
@@ -249,41 +255,65 @@ def sync(
         by_type=dict(by_type),
     )
 
-    if not new:
-        return new
-
     if cusip_map is None:
         cusip_map = load_cusips()
 
-    amend_filings = [
-        f for f in new
+    def is_13d(f):
+        return f.form_type.startswith(
+            'SCHEDULE 13D'
+        ) or f.form_type.startswith('SC 13D')
+
+    amend_all = [
+        f for f in all_filings
         if f.form_type == '13F-HR/A'
     ]
-    other_filings = [
+    d13_all = [
+        f for f in all_filings if is_13d(f)
+    ]
+    other_new = [
         f for f in new
         if f.form_type != '13F-HR/A'
+        and not is_13d(f)
     ]
 
-    if amend_filings:
+    if amend_all:
         def on_amend(f, raw):
             _process_13f_amendment(
                 f, raw, cusip_map
             )
 
         log.info(
-            'processing amendments',
-            count=len(amend_filings),
+            'processing 13F amendments',
+            count=len(amend_all),
         )
         asyncio.run(
             fetch_filings_async(
-                amend_filings, on_amend
+                amend_all, on_amend
             )
         )
 
-    if other_filings and callback:
+    if d13_all:
+        def on_13d(f, raw):
+            d = parse_13d(raw)
+            if d:
+                upsert_13d(
+                    f.date_filed, d, cusip_map
+                )
+
+        log.info(
+            'processing 13D filings',
+            count=len(d13_all),
+        )
         asyncio.run(
             fetch_filings_async(
-                other_filings, callback
+                d13_all, on_13d
+            )
+        )
+
+    if other_new and callback:
+        asyncio.run(
+            fetch_filings_async(
+                other_new, callback
             )
         )
 
