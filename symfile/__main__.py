@@ -26,6 +26,8 @@ import sys
 import time
 from datetime import date, timedelta
 
+from symfile.util.dates import prev_weekday
+
 from symfile.edgar.index import (
     fetch_daily_index,
     fetch_filings_async,
@@ -44,12 +46,6 @@ from symfile.mds.syms import (
 MIN_TRADE_VALUE = 25_000_000
 
 
-def _prev_weekday(d: date) -> date:
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-
 def cmd_tickers() -> None:
     tickers = load_tickers()
     print(f'{len(tickers)} symbols loaded')
@@ -61,7 +57,7 @@ def cmd_refs() -> None:
 
 
 def cmd_scan(args: list[str]) -> None:
-    target_date = _prev_weekday(
+    target_date = prev_weekday(
         date.today() - timedelta(days=1)
     )
     if '--date' in args:

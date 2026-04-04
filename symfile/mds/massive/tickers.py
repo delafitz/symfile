@@ -5,14 +5,12 @@ if less than MAX_AGE_DAYS old, otherwise refetches.
 """
 
 import csv
-import os
 import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from massive import RESTClient
-
 from symfile.mds import DATA_DIR
+from symfile.mds.massive.session import get_client
 
 MAX_AGE_DAYS = 30
 
@@ -37,12 +35,7 @@ def _find_cached() -> tuple[Path, date] | None:
 
 def _fetch_tickers() -> list[dict]:
     """Fetch all tickers from Polygon."""
-    api_key = os.environ.get('POLYGON_API_KEY', '')
-    if not api_key:
-        raise RuntimeError(
-            'POLYGON_API_KEY not set'
-        )
-    client = RESTClient(api_key=api_key)
+    client = get_client()
     rows = []
     for t in client.list_tickers(
         market='stocks',

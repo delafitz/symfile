@@ -10,15 +10,13 @@ Caches to data/mds/refs.YYYYMMDD.csv.
 
 import asyncio
 import csv
-import os
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
-from massive import RESTClient
-
 from symfile.mds import DATA_DIR
+from symfile.mds.massive.session import get_client
 
 MAX_AGE_DAYS = 7
 MIN_MKT_CAP = 1_000_000_000
@@ -55,10 +53,7 @@ async def _fetch_refs_async(
     tickers: dict[str, dict],
 ) -> list[RefRow]:
     """Fetch prices + market cap for all CS tickers."""
-    api_key = os.environ.get('POLYGON_API_KEY', '')
-    if not api_key:
-        raise RuntimeError('POLYGON_API_KEY not set')
-    client = RESTClient(api_key=api_key)
+    client = get_client()
 
     # Phase 1: bulk snapshot for prices (one call)
     print('phase 1: snapshots...')

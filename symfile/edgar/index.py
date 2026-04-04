@@ -7,6 +7,8 @@ Parses master.idx files (pipe-delimited):
 from dataclasses import dataclass
 from datetime import date
 
+from symfile.util.dates import quarter as _quarter
+
 from symfile.edgar.fetch import (
     FILING_BASE,
     fetch_many_async,
@@ -64,10 +66,6 @@ def _parse_master_idx(
             )
         )
     return filings
-
-
-def _quarter(d: date) -> int:
-    return (d.month - 1) // 3 + 1
 
 
 def fetch_daily_index(

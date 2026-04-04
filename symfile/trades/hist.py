@@ -13,6 +13,7 @@ Usage:
 """
 
 import asyncio
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
@@ -24,7 +25,7 @@ from symfile.edgar.index import (
     fetch_full_index,
     filter_forms,
 )
-import re
+from symfile.util.dates import quarters
 
 from symfile.edgar.parse.form144 import (
     Filing144,
@@ -129,22 +130,6 @@ class Trade:
     nature: str = ''
     pct_outstanding: float = 0.0
 
-
-def _quarters(
-    start: date, end: date
-) -> list[tuple[int, int]]:
-    """Generate (year, quarter) tuples covering
-    start to end."""
-    qtrs = []
-    y, q = start.year, (start.month - 1) // 3 + 1
-    ey, eq = end.year, (end.month - 1) // 3 + 1
-    while (y, q) <= (ey, eq):
-        qtrs.append((y, q))
-        q += 1
-        if q > 4:
-            q = 1
-            y += 1
-    return qtrs
 
 
 def _build_bank_ciks(
@@ -378,7 +363,7 @@ def get_trades(
     all_144: list[Trade] = []
     all_reg: list[Trade] = []
 
-    for year, qtr in _quarters(start, end):
+    for year, qtr in quarters(start, end):
         print(f'Q{qtr} {year}...', end='', flush=True)
         filings = fetch_full_index(year, qtr)
 

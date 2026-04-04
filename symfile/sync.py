@@ -24,6 +24,11 @@ from symfile.mds.syms import (
     load_syms,
     load_tickers,
 )
+from symfile.util.dates import (
+    prev_weekday,
+    quarter,
+    weekdays,
+)
 
 WATCHED_FORMS = ('144', '13F-HR/A')
 
@@ -51,16 +56,6 @@ def init_mds() -> dict:
     }
 
 
-def _quarter(d: date) -> int:
-    return (d.month - 1) // 3 + 1
-
-
-def _prev_weekday(d: date) -> date:
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-
 def _last_daily() -> date | None:
     """Find the most recent daily index on disk."""
     if not INDEX_DIR.exists():
@@ -79,20 +74,6 @@ def _last_daily() -> date | None:
     return best
 
 
-def _weekdays(
-    start: date, end: date
-) -> list[date]:
-    """Generate weekdays from start to end
-    inclusive."""
-    days = []
-    d = start
-    while d <= end:
-        if d.weekday() < 5:
-            days.append(d)
-        d += timedelta(days=1)
-    return days
-
-
 def sync(
     callback=None,
 ) -> list[Filing]:
@@ -108,16 +89,16 @@ def sync(
 
     Returns list of new filings found.
     """
-    today = _prev_weekday(date.today())
+    today = prev_weekday(date.today())
     last = _last_daily()
-    qtr = _quarter(today)
+    qtr = quarter(today)
     year = today.year
 
     print(f'=== sync (today={today}) ===')
 
     all_filings: list[Filing] = []
 
-    if last is None or _quarter(last) != qtr:
+    if last is None or quarter(last) != qtr:
         print(
             f'  no dailies for {year}/Q{qtr}, '
             f'fetching full index...'
@@ -147,7 +128,7 @@ def sync(
         if last
         else today
     )
-    days = _weekdays(start, today)
+    days = weekdays(start, today)
 
     if last == today:
         days = [today]

@@ -10,14 +10,12 @@ Caches to data/mds/cusips.YYYYMMDD.csv.
 
 import asyncio
 import csv
-import os
 import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from massive import RESTClient
-
 from symfile.mds import DATA_DIR
+from symfile.mds.massive.session import get_client
 
 MAX_AGE_DAYS = 30
 CONCURRENCY = 20
@@ -50,10 +48,7 @@ async def _fetch_cusips_async(
     Only returns mappings where the resolved ticker
     is in the given universe set.
     """
-    api_key = os.environ.get('POLYGON_API_KEY', '')
-    if not api_key:
-        raise RuntimeError('POLYGON_API_KEY not set')
-    client = RESTClient(api_key=api_key)
+    client = get_client()
 
     sem = asyncio.Semaphore(CONCURRENCY)
     result: dict[str, str] = {}
