@@ -216,14 +216,18 @@ def build_all(
         )
 
     if quarters:
+        from symfile.holdings.form4 import (
+            truncate as truncate_f4,
+        )
         from symfile.holdings.schedule13d import (
-            truncate,
+            truncate as truncate_13d,
         )
 
         prev_y, prev_q = quarters[-2] if len(
             quarters
         ) > 1 else quarters[0]
-        truncate(prev_y, prev_q)
+        truncate_13d(prev_y, prev_q)
+        truncate_f4(prev_y, prev_q)
 
     return paths
 

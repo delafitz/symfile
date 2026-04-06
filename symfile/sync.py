@@ -22,12 +22,18 @@ from symfile.edgar.index import (
 from symfile.edgar.parse.form13f import (
     parse_13f_holdings,
 )
+from symfile.edgar.parse.form4 import (
+    parse_form4,
+)
 from symfile.edgar.parse.schedule13d import (
     parse_13d,
 )
 from symfile.holdings.build import (
     build_all,
     upsert_amendment,
+)
+from symfile.holdings.form4 import (
+    upsert_form4,
 )
 from symfile.holdings.schedule13d import (
     upsert_13d,
@@ -44,12 +50,22 @@ from symfile.util.dates import (
 )
 from symfile.util.log import log
 
-WATCHED_FORMS = (
+WATCHED_PREFIXES = (
     '144',
     '13F-HR/A',
     'SCHEDULE 13D',
     'SC 13D',
 )
+WATCHED_EXACT = {'4', '4/A'}
+
+
+def _is_watched(form_type: str) -> bool:
+    if form_type in WATCHED_EXACT:
+        return True
+    return any(
+        form_type.startswith(p)
+        for p in WATCHED_PREFIXES
+    )
 
 
 def init_mds() -> dict:
@@ -172,10 +188,7 @@ def sync(
         watched = [
             f
             for f in full
-            if any(
-                f.form_type.startswith(p)
-                for p in WATCHED_FORMS
-            )
+            if _is_watched(f.form_type)
         ]
         all_filings.extend(watched)
         if full:
@@ -213,10 +226,7 @@ def sync(
         watched = [
             f
             for f in filings
-            if any(
-                f.form_type.startswith(p)
-                for p in WATCHED_FORMS
-            )
+            if _is_watched(f.form_type)
         ]
         all_filings.extend(watched)
         if watched:
@@ -263,6 +273,18 @@ def sync(
             'SCHEDULE 13D'
         ) or f.form_type.startswith('SC 13D')
 
+    def is_form4(f):
+        return f.form_type in ('4', '4/A')
+
+    syms = load_syms()
+    sym_universe = set(syms.keys())
+    universe_ciks = set()
+    from symfile.mds.massive.refs import (
+        build_cik_map,
+    )
+    for cik in build_cik_map(syms):
+        universe_ciks.add(cik)
+
     amend_all = [
         f for f in all_filings
         if f.form_type == '13F-HR/A'
@@ -270,10 +292,16 @@ def sync(
     d13_all = [
         f for f in all_filings if is_13d(f)
     ]
+    f4_all = [
+        f for f in all_filings
+        if is_form4(f)
+        and f.cik in universe_ciks
+    ]
     other_new = [
         f for f in new
         if f.form_type != '13F-HR/A'
         and not is_13d(f)
+        and not is_form4(f)
     ]
 
     if amend_all:
@@ -307,6 +335,26 @@ def sync(
         asyncio.run(
             fetch_filings_async(
                 d13_all, on_13d
+            )
+        )
+
+    if f4_all:
+        def on_f4(f, raw):
+            txns = parse_form4(raw)
+            if txns:
+                upsert_form4(
+                    f.date_filed,
+                    txns,
+                    sym_universe,
+                )
+
+        log.info(
+            'processing Form 4',
+            count=len(f4_all),
+        )
+        asyncio.run(
+            fetch_filings_async(
+                f4_all, on_f4
             )
         )
 
