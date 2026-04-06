@@ -296,61 +296,35 @@ def sync(
     for cik in build_cik_map(syms):
         universe_ciks.add(cik)
 
-    amend_all = [
+    to_process = [
         f for f in all_filings
         if f.form_type == '13F-HR/A'
+        or is_13d(f)
+        or (is_form4(f) and f.cik in universe_ciks)
     ]
-    d13_all = [
-        f for f in all_filings if is_13d(f)
-    ]
-    f4_all = [
-        f for f in all_filings
-        if is_form4(f)
-        and f.cik in universe_ciks
-    ]
-    other_new = [
-        f for f in new
-        if f.form_type != '13F-HR/A'
-        and not is_13d(f)
-        and not is_form4(f)
-    ]
+    if callback:
+        to_process.extend(
+            f for f in new
+            if f.form_type != '13F-HR/A'
+            and not is_13d(f)
+            and not is_form4(f)
+        )
 
-    if amend_all:
-        def on_amend(f, raw):
+    if not to_process:
+        return new
+
+    def dispatch(f, raw):
+        if f.form_type == '13F-HR/A':
             _process_13f_amendment(
                 f, raw, cusip_map
             )
-
-        log.info(
-            'processing 13F amendments',
-            count=len(amend_all),
-        )
-        asyncio.run(
-            fetch_filings_async(
-                amend_all, on_amend
-            )
-        )
-
-    if d13_all:
-        def on_13d(f, raw):
+        elif is_13d(f):
             d = parse_13d(raw)
             if d:
                 upsert_13d(
                     f.date_filed, d, cusip_map
                 )
-
-        log.info(
-            'processing 13D filings',
-            count=len(d13_all),
-        )
-        asyncio.run(
-            fetch_filings_async(
-                d13_all, on_13d
-            )
-        )
-
-    if f4_all:
-        def on_f4(f, raw):
+        elif is_form4(f):
             txns = parse_form4(raw)
             if txns:
                 upsert_form4(
@@ -358,22 +332,17 @@ def sync(
                     txns,
                     sym_universe,
                 )
+        elif callback:
+            callback(f, raw)
 
-        log.info(
-            'processing Form 4',
-            count=len(f4_all),
+    log.info(
+        'processing filings',
+        count=len(to_process),
+    )
+    asyncio.run(
+        fetch_filings_async(
+            to_process, dispatch
         )
-        asyncio.run(
-            fetch_filings_async(
-                f4_all, on_f4
-            )
-        )
-
-    if other_new and callback:
-        asyncio.run(
-            fetch_filings_async(
-                other_new, callback
-            )
-        )
+    )
 
     return new
