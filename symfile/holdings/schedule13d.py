@@ -43,7 +43,9 @@ def _empty() -> pl.DataFrame:
 def load_13d() -> pl.DataFrame:
     if not TABLE_PATH.exists():
         return _empty()
-    return pl.read_parquet(TABLE_PATH)
+    return pl.read_parquet(TABLE_PATH).select(
+        list(SCHEMA.keys())
+    )
 
 
 def _save(df: pl.DataFrame) -> None:

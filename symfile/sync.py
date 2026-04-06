@@ -178,22 +178,33 @@ def sync(
 
     all_filings: list[Filing] = []
 
+    prev_qtr = qtr - 1
+    prev_year = year
+    if prev_qtr == 0:
+        prev_qtr = 4
+        prev_year -= 1
+
     if last is None or quarter(last) != qtr:
-        log.info(
-            'cold start — fetching full index',
-            year=year,
-            qtr=qtr,
-        )
-        full = fetch_full_index(year, qtr)
-        watched = [
-            f
-            for f in full
-            if _is_watched(f.form_type)
-        ]
-        all_filings.extend(watched)
-        if full:
+        for fy, fq in [
+            (prev_year, prev_qtr),
+            (year, qtr),
+        ]:
+            log.info(
+                'fetching full index',
+                year=fy,
+                qtr=fq,
+            )
+            full = fetch_full_index(fy, fq)
+            watched = [
+                f
+                for f in full
+                if _is_watched(f.form_type)
+            ]
+            all_filings.extend(watched)
+
+        if all_filings:
             dates = set(
-                f.date_filed for f in full
+                f.date_filed for f in all_filings
             )
             earliest = min(dates)
             d = date(
