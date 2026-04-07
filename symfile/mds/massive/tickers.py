@@ -4,10 +4,11 @@ Caches to data/mds/tickers.YYYYMMDD.csv. Reuses cache
 if less than MAX_AGE_DAYS old, otherwise refetches.
 """
 
-import csv
 import re
 from datetime import date, timedelta
 from pathlib import Path
+
+import polars as pl
 
 from symfile.mds import DATA_DIR
 from symfile.mds.massive.session import get_client
@@ -62,15 +63,11 @@ def _save(rows: list[dict]) -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     stamp = date.today().strftime('%Y%m%d')
     path = DATA_DIR / f'tickers.{stamp}.csv'
-    with open(path, 'w', newline='') as f:
-        w = csv.DictWriter(
-            f,
-            fieldnames=[
-                'symbol', 'name', 'cik', 'type',
-            ],
-        )
-        w.writeheader()
-        w.writerows(rows)
+    df = pl.DataFrame(
+        rows,
+        schema=['symbol', 'name', 'cik', 'type'],
+    )
+    df.write_csv(path)
     log.info('saved tickers', count=len(rows), path=str(path))
     return path
 
@@ -90,10 +87,11 @@ def load_tickers(
     if cached and cached[1] >= cutoff:
         path = cached[0]
         log.debug('cached tickers', file=path.name)
-        result = {}
-        with open(path) as f:
-            for row in csv.DictReader(f):
-                result[row['symbol']] = row
+        df = pl.read_csv(path, infer_schema=False)
+        result = {
+            row['symbol']: row
+            for row in df.to_dicts()
+        }
         log.info('tickers loaded', count=len(result))
         return result
 

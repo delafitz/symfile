@@ -277,6 +277,15 @@ def backfill_13d() -> None:
 
 
 @app.command()
+def backup() -> None:
+    """Create a dated tar.gz backup of downloaded data."""
+    from symfile.backup import create_backup
+
+    path = create_backup()
+    print(path)
+
+
+@app.command()
 def serve(
     port: Annotated[
         int, typer.Option(help='Port')

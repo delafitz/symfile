@@ -163,7 +163,7 @@ def top_holders(
     )
 
     with pl.Config(
-        tbl_formatting='NOTHING',
+        tbl_formatting='UTF8_FULL_CONDENSED',
         tbl_hide_dataframe_shape=True,
         tbl_hide_column_data_types=True,
         tbl_hide_column_names=False,
@@ -242,7 +242,7 @@ def _print_movers(
         )
 
     with pl.Config(
-        tbl_formatting='NOTHING',
+        tbl_formatting='UTF8_FULL_CONDENSED',
         tbl_hide_dataframe_shape=True,
         tbl_hide_column_data_types=True,
         tbl_hide_column_names=False,

@@ -9,10 +9,11 @@ Caches to data/mds/cusips.YYYYMMDD.csv.
 """
 
 import asyncio
-import csv
 import re
 from datetime import date, timedelta
 from pathlib import Path
+
+import polars as pl
 
 from symfile.mds import DATA_DIR
 from symfile.mds.massive.session import get_client
@@ -98,27 +99,28 @@ def _save(
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     stamp = date.today().strftime('%Y%m%d')
     path = DATA_DIR / f'cusips.{stamp}.csv'
-    with open(path, 'w', newline='') as f:
-        w = csv.DictWriter(
-            f, fieldnames=['cusip', 'symbol']
-        )
-        w.writeheader()
-        for cusip, sym in sorted(
-            mapping.items()
-        ):
-            w.writerow(
-                {'cusip': cusip, 'symbol': sym}
-            )
+    sorted_items = sorted(mapping.items())
+    df = pl.DataFrame(
+        {
+            'cusip': [c for c, _ in sorted_items],
+            'symbol': [s for _, s in sorted_items],
+        },
+        schema={
+            'cusip': pl.Utf8,
+            'symbol': pl.Utf8,
+        },
+    )
+    df.write_csv(path)
     log.info('saved cusips', count=len(mapping), path=str(path))
     return path
 
 
 def _load_csv(path: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
-    with open(path) as f:
-        for row in csv.DictReader(f):
-            result[row['cusip']] = row['symbol']
-    return result
+    df = pl.read_csv(path, infer_schema=False)
+    return {
+        row['cusip']: row['symbol']
+        for row in df.to_dicts()
+    }
 
 
 def load_cusips(

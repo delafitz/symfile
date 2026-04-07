@@ -9,11 +9,12 @@ Caches to data/mds/refs.YYYYMMDD.csv.
 """
 
 import asyncio
-import csv
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+
+import polars as pl
 
 from symfile.mds import DATA_DIR
 from symfile.mds.massive.session import get_client
@@ -127,40 +128,50 @@ def _save(rows: list[RefRow]) -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     stamp = date.today().strftime('%Y%m%d')
     path = DATA_DIR / f'refs.{stamp}.csv'
-    with open(path, 'w', newline='') as f:
-        w = csv.DictWriter(
-            f,
-            fieldnames=[
-                'symbol', 'cik', 'name',
-                'mkt_cap', 'price',
-            ],
-        )
-        w.writeheader()
-        for r in rows:
-            w.writerow(
-                {
-                    'symbol': r.symbol,
-                    'cik': r.cik,
-                    'name': r.name,
-                    'mkt_cap': r.mkt_cap,
-                    'price': r.price,
-                }
-            )
+    df = pl.DataFrame(
+        [
+            {
+                'symbol': r.symbol,
+                'cik': r.cik,
+                'name': r.name,
+                'mkt_cap': r.mkt_cap,
+                'price': r.price,
+            }
+            for r in rows
+        ],
+        schema={
+            'symbol': pl.Utf8,
+            'cik': pl.Utf8,
+            'name': pl.Utf8,
+            'mkt_cap': pl.Float64,
+            'price': pl.Float64,
+        },
+    )
+    df.write_csv(path)
     log.info('saved refs', count=len(rows), path=str(path))
     return path
 
 
 def _load_csv(path: Path) -> dict[str, RefRow]:
+    df = pl.read_csv(
+        path,
+        schema={
+            'symbol': pl.Utf8,
+            'cik': pl.Utf8,
+            'name': pl.Utf8,
+            'mkt_cap': pl.Float64,
+            'price': pl.Float64,
+        },
+    )
     result: dict[str, RefRow] = {}
-    with open(path) as f:
-        for row in csv.DictReader(f):
-            result[row['symbol']] = RefRow(
-                symbol=row['symbol'],
-                cik=row['cik'],
-                name=row['name'],
-                mkt_cap=float(row['mkt_cap']),
-                price=float(row['price']),
-            )
+    for row in df.to_dicts():
+        result[row['symbol']] = RefRow(
+            symbol=row['symbol'],
+            cik=row['cik'],
+            name=row['name'],
+            mkt_cap=row['mkt_cap'],
+            price=row['price'],
+        )
     return result
 
 

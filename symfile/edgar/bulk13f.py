@@ -7,12 +7,13 @@ Each zip contains TSV files: INFOTABLE, COVERPAGE,
 SUBMISSION, SUMMARYPAGE, etc.
 """
 
-import csv
 import io
 import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+import polars as pl
 
 from symfile.edgar.fetch import USER_AGENT
 from symfile.util.log import log
@@ -101,12 +102,14 @@ def read_infotable(
     """Read INFOTABLE.tsv from a 13F bulk zip."""
     with zipfile.ZipFile(zip_path) as zf:
         raw = zf.read('INFOTABLE.tsv')
-    text = raw.decode('utf-8', errors='replace')
-    reader = csv.DictReader(
-        io.StringIO(text), delimiter='\t'
+    df = pl.read_csv(
+        io.BytesIO(raw),
+        separator='\t',
+        infer_schema=False,
+        encoding='utf8-lossy',
     )
     rows = []
-    for r in reader:
+    for r in df.to_dicts():
         rows.append(
             InfoRow(
                 accession=r['ACCESSION_NUMBER'],
@@ -119,11 +122,13 @@ def read_infotable(
                 ),
                 sh_type=r.get(
                     'SSHPRNAMTTYPE', ''
-                ),
-                put_call=r.get('PUTCALL', ''),
+                ) or '',
+                put_call=r.get(
+                    'PUTCALL', ''
+                ) or '',
                 discretion=r.get(
                     'INVESTMENTDISCRETION', ''
-                ),
+                ) or '',
                 sole=_int_or_zero(
                     r.get('VOTING_AUTH_SOLE', '')
                 ),
@@ -148,12 +153,14 @@ def read_submissions(
     """Read SUBMISSION.tsv -> accession->info."""
     with zipfile.ZipFile(zip_path) as zf:
         raw = zf.read('SUBMISSION.tsv')
-    text = raw.decode('utf-8', errors='replace')
-    reader = csv.DictReader(
-        io.StringIO(text), delimiter='\t'
+    df = pl.read_csv(
+        io.BytesIO(raw),
+        separator='\t',
+        infer_schema=False,
+        encoding='utf8-lossy',
     )
     result = {}
-    for r in reader:
+    for r in df.to_dicts():
         result[r['ACCESSION_NUMBER']] = {
             'cik': r['CIK'],
             'filing_date': r['FILING_DATE'],
