@@ -1,7 +1,7 @@
 """Logging setup. Console for CLI, JSON for server.
 
 Usage:
-    from symfile.util.log import log
+    from app.util.log import log
     log.info("thing happened", key=value)
 
 Call configure_logging() at startup to set mode.

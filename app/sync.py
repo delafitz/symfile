@@ -9,46 +9,46 @@ import asyncio
 import re
 from datetime import date, timedelta
 
-from symfile.edgar.fetch import (
+from app.edgar.fetch import (
     INDEX_DIR,
     get_cached,
 )
-from symfile.edgar.index import (
+from app.edgar.index import (
     Filing,
     fetch_daily_index,
     fetch_filings_async,
     fetch_full_index,
 )
-from symfile.edgar.parse.form13f import (
+from app.edgar.parse.form13f import (
     parse_13f_holdings,
 )
-from symfile.edgar.parse.form4 import (
+from app.edgar.parse.form4 import (
     parse_form4,
 )
-from symfile.edgar.parse.schedule13d import (
+from app.edgar.parse.schedule13d import (
     parse_13d,
 )
-from symfile.holdings.build import (
+from app.holdings.build import (
     build_all,
     upsert_amendment,
 )
-from symfile.holdings.form4 import (
+from app.holdings.form4 import (
     upsert_form4,
 )
-from symfile.holdings.schedule13d import (
+from app.holdings.schedule13d import (
     upsert_13d,
 )
-from symfile.mds.syms import (
+from app.mds.syms import (
     load_cusips,
     load_syms,
     load_tickers,
 )
-from symfile.util.dates import (
+from app.util.dates import (
     prev_weekday,
     quarter,
     weekdays,
 )
-from symfile.util.log import log
+from app.util.log import log
 
 WATCHED_PREFIXES = (
     '144',
@@ -292,7 +292,7 @@ def sync(
     syms = load_syms()
     sym_universe = set(syms.keys())
     universe_ciks = set()
-    from symfile.mds.massive.refs import (
+    from app.mds.massive.refs import (
         build_cik_map,
     )
     for cik in build_cik_map(syms):

@@ -2,11 +2,11 @@
 
 import polars as pl
 
-from symfile.holdings.build import (
+from app.holdings.build import (
     load_effective,
 )
-from symfile.mds.syms import load_syms
-from symfile.util.names import short_name
+from app.mds.syms import load_syms
+from app.util.names import short_name
 
 
 def _shares_out(ref) -> int:

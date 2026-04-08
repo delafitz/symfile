@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "SEC filing tools"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi[standard]>=0.115.0",
     "massive",
     "polars>=1.39.3",
     "structlog>=25.5.0",
@@ -11,7 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-symfile = "symfile.__main__:app"
+symfile = "app.__main__:app"
 
 [tool.ruff]
 line-length = 70

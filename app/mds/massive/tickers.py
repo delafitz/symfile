@@ -10,9 +10,9 @@ from pathlib import Path
 
 import polars as pl
 
-from symfile.mds import DATA_DIR
-from symfile.mds.massive.session import get_client
-from symfile.util.log import log
+from app.mds import DATA_DIR
+from app.mds.massive.session import get_client
+from app.util.log import log
 
 MAX_AGE_DAYS = 30
 

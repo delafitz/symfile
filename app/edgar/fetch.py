@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, TypeVar
 
-from symfile.util.log import log
+from app.util.log import log
 
 DATA_DIR = (
     Path(__file__).resolve().parent.parent.parent

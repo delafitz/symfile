@@ -13,8 +13,8 @@ from pathlib import Path
 
 import polars as pl
 
-from symfile.mds import DATA_DIR as MDS_DIR
-from symfile.util.log import log
+from app.mds import DATA_DIR as MDS_DIR
+from app.util.log import log
 
 HOLDINGS_DIR = Path(MDS_DIR).parent / 'holdings'
 TABLE_PATH = HOLDINGS_DIR / 'form4.parquet'
@@ -112,7 +112,7 @@ def truncate(
     if df.height == 0:
         return
 
-    from symfile.holdings.build import (
+    from app.holdings.build import (
         _quarter_end,
         _to_iso,
     )

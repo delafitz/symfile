@@ -7,10 +7,10 @@ Parses master.idx files (pipe-delimited):
 from dataclasses import dataclass
 from datetime import date
 
-from symfile.util.dates import quarter as _quarter
-from symfile.util.log import log
+from app.util.dates import quarter as _quarter
+from app.util.log import log
 
-from symfile.edgar.fetch import (
+from app.edgar.fetch import (
     FILING_BASE,
     fetch_many_async,
     fetch_url,

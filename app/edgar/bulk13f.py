@@ -15,8 +15,8 @@ from pathlib import Path
 
 import polars as pl
 
-from symfile.edgar.fetch import USER_AGENT
-from symfile.util.log import log
+from app.edgar.fetch import USER_AGENT
+from app.util.log import log
 
 BASE_URL = (
     'https://www.sec.gov/files/structureddata'

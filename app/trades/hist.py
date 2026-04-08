@@ -18,26 +18,26 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 
-from symfile.edgar.fetch import SEC_RPS
-from symfile.edgar.index import (
+from app.edgar.fetch import SEC_RPS
+from app.edgar.index import (
     Filing,
     fetch_filings_async,
     fetch_full_index,
     filter_forms,
 )
-from symfile.util.dates import quarters
+from app.util.dates import quarters
 
-from symfile.edgar.parse.form144 import (
+from app.edgar.parse.form144 import (
     Filing144,
     parse_144,
 )
-from symfile.edgar.parse.reg import (
+from app.edgar.parse.reg import (
     BANK_SYMS,
     REG_FORMS,
     parse_reg,
 )
-from symfile.mds.massive.refs import RefRow
-from symfile.util.log import log
+from app.mds.massive.refs import RefRow
+from app.util.log import log
 
 MIN_144_VALUE = 25_000_000
 MIN_REG_VALUE = 50_000_000
@@ -340,7 +340,7 @@ def get_trades(
 
     Returns list of Trade records sorted by date.
     """
-    import symfile.edgar.fetch as fetch_mod
+    import app.edgar.fetch as fetch_mod
 
     fetch_mod.SEC_RPS = rps
 

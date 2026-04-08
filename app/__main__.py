@@ -15,7 +15,7 @@ app = typer.Typer(
 @app.command()
 def init() -> None:
     """Initialize all market data + holdings."""
-    from symfile.sync import init_mds
+    from app.sync import init_mds
 
     init_mds()
 
@@ -23,7 +23,7 @@ def init() -> None:
 @app.command()
 def sync() -> None:
     """Catch up on daily filings (144, 13F-HR/A)."""
-    from symfile.sync import sync as do_sync
+    from app.sync import sync as do_sync
 
     new = do_sync()
     print(f'{len(new)} new filings')
@@ -32,7 +32,7 @@ def sync() -> None:
 @app.command()
 def tickers() -> None:
     """Load/refresh the symbol-CIK mapping."""
-    from symfile.mds.syms import load_tickers
+    from app.mds.syms import load_tickers
 
     t = load_tickers()
     print(f'{len(t)} symbols loaded')
@@ -41,7 +41,7 @@ def tickers() -> None:
 @app.command()
 def refs() -> None:
     """Build/refresh reference data cache."""
-    from symfile.mds.syms import load_syms
+    from app.mds.syms import load_syms
 
     syms = load_syms(max_age_days=0)
     print(f'{len(syms)} refs loaded')
@@ -50,11 +50,11 @@ def refs() -> None:
 @app.command()
 def cusips() -> None:
     """Build CUSIP->symbol map from 13F bulk zips."""
-    from symfile.edgar.bulk13f import (
+    from app.edgar.bulk13f import (
         extract_cusips,
         fetch_bulk_zip,
     )
-    from symfile.mds.syms import (
+    from app.mds.syms import (
         load_cusips,
         load_syms,
     )
@@ -85,8 +85,8 @@ def cusips() -> None:
 @app.command()
 def build() -> None:
     """Build quarterly holdings parquet files."""
-    from symfile.holdings.build import build_all
-    from symfile.mds.syms import load_cusips
+    from app.holdings.build import build_all
+    from app.mds.syms import load_cusips
 
     build_all(load_cusips())
 
@@ -102,7 +102,7 @@ def holders(
     ] = 20,
 ) -> None:
     """Top holders report for a symbol."""
-    from symfile.holdings.report import top_holders
+    from app.holdings.report import top_holders
 
     top_holders(symbol.upper(), n=n)
 
@@ -135,8 +135,8 @@ def scan(
     ] = False,
 ) -> None:
     """Scan for block trades (144 + reg)."""
-    from symfile.mds.syms import load_syms
-    from symfile.trades.hist import get_trades
+    from app.mds.syms import load_syms
+    from app.trades.hist import get_trades
 
     syms = load_syms()
 
@@ -192,20 +192,20 @@ def backfill_13d() -> None:
 
     import polars as pl
 
-    from symfile.edgar.index import (
+    from app.edgar.index import (
         fetch_filings_async,
         fetch_full_index,
     )
-    from symfile.edgar.parse.schedule13d import (
+    from app.edgar.parse.schedule13d import (
         parse_13d,
     )
-    from symfile.holdings.schedule13d import (
+    from app.holdings.schedule13d import (
         HOLDINGS_DIR,
         SCHEMA,
         TABLE_PATH,
     )
-    from symfile.mds.syms import load_cusips
-    from symfile.util.log import log
+    from app.mds.syms import load_cusips
+    from app.util.log import log
 
     cusip_map = load_cusips()
     rows: list[dict] = []
@@ -279,7 +279,7 @@ def backfill_13d() -> None:
 @app.command()
 def backup() -> None:
     """Create a dated tar.gz backup of downloaded data."""
-    from symfile.backup import create_backup
+    from app.backup import create_backup
 
     path = create_backup()
     print(path)
@@ -292,7 +292,14 @@ def serve(
     ] = 8000,
 ) -> None:
     """Run the API server."""
-    print(f'server on :{port} (not yet wired)')
+    import uvicorn
+
+    uvicorn.run(
+        'app.main:app',
+        host='0.0.0.0',
+        port=port,
+        reload=True,
+    )
 
 
 if __name__ == '__main__':

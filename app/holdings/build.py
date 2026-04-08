@@ -17,9 +17,9 @@ from pathlib import Path
 
 import polars as pl
 
-from symfile.edgar.bulk13f import fetch_bulk_zip
-from symfile.mds import DATA_DIR as MDS_DIR
-from symfile.util.log import log
+from app.edgar.bulk13f import fetch_bulk_zip
+from app.mds import DATA_DIR as MDS_DIR
+from app.util.log import log
 
 HOLDINGS_DIR = (
     Path(MDS_DIR).parent / 'holdings'
@@ -216,10 +216,10 @@ def build_all(
         )
 
     if quarters:
-        from symfile.holdings.form4 import (
+        from app.holdings.form4 import (
             truncate as truncate_f4,
         )
-        from symfile.holdings.schedule13d import (
+        from app.holdings.schedule13d import (
             truncate as truncate_13d,
         )
 
@@ -281,11 +281,18 @@ def load_effective(
     Layer 3: 13D positions (per holder+symbol,
              only where 13D event is after the
              quarter end and after the 13F date)
+
+    Adds form_type column: '13F', '13D'.
     """
-    base = load_quarter(year, qtr)
+    base = load_quarter(year, qtr).with_columns(
+        pl.lit('13F').alias('form_type')
+    )
     amends = load_amendments(year, qtr)
 
     if amends.height > 0:
+        amends = amends.with_columns(
+            pl.lit('13F').alias('form_type')
+        )
         amended_holders = amends.select(
             'holder'
         ).unique()
@@ -344,10 +351,10 @@ def _overlay_13d(
     quarter end date AND after the holder's 13F
     filing date for that symbol.
     """
-    from symfile.holdings.aliases import (
+    from app.holdings.aliases import (
         build_matcher,
     )
-    from symfile.holdings.schedule13d import (
+    from app.holdings.schedule13d import (
         load_13d,
     )
 
@@ -404,9 +411,12 @@ def _overlay_13d(
         'holder': pl.Utf8,
         'shares': pl.Int64,
         'base_shares': pl.Int64,
-    }).select(
+    }).with_columns(
+        pl.lit('13D').alias('form_type')
+    ).select(
         'symbol', 'filing_date',
         'holder', 'shares', 'base_shares',
+        'form_type',
     )
 
     kept = holdings.join(
@@ -421,7 +431,9 @@ def _overlay_13d(
             .alias('base_shares')
         )
 
-    return pl.concat([kept, upd])
+    return pl.concat(
+        [kept.select(upd.columns), upd]
+    )
 
 
 def upsert_amendment(
