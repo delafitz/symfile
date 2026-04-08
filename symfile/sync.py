@@ -214,15 +214,13 @@ def sync(
             )
             last = d
 
-    start = (
-        last + timedelta(days=1)
-        if last
-        else today
+    yesterday = prev_weekday(
+        today - timedelta(days=1)
     )
+    start = last if last else yesterday
+    if start > yesterday:
+        start = yesterday
     days = weekdays(start, today)
-
-    if last == today:
-        days = [today]
 
     if days:
         log.info(
@@ -233,7 +231,11 @@ def sync(
         )
 
     for d in days:
-        filings = fetch_daily_index(d)
+        filings = fetch_daily_index(
+            d, force=(d >= yesterday)
+        )
+        if not filings:
+            continue
         watched = [
             f
             for f in filings

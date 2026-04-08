@@ -74,13 +74,19 @@ def _parse_master_idx(
 
 def fetch_daily_index(
     d: date,
+    force: bool = False,
 ) -> list[Filing]:
-    """Fetch daily master.idx (cached)."""
+    """Fetch daily master.idx (cached).
+
+    force=True re-fetches even if cached (for
+    re-checking a day that may have grown).
+    """
     stamp = d.strftime('%Y%m%d')
     name = f'daily.{stamp}'
-    cached = get_index(name)
-    if cached:
-        return _parse_master_idx(cached)
+    if not force:
+        cached = get_index(name)
+        if cached:
+            return _parse_master_idx(cached)
     url = DAILY_URL.format(
         year=d.year,
         qtr=_quarter(d),
