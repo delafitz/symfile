@@ -159,13 +159,40 @@ def build_amendments(
 ) -> Path:
     """Build amendments parquet from bulk zip.
 
-    Keeps only the latest amendment per filer.
+    A filer may submit multiple 13F-HR/A filings
+    (sequential accession numbers, same date).
+    Keep only the latest accession per filer so
+    positions are not duplicated.
     """
     out = _amends_path(year, qtr)
     zp = fetch_bulk_zip(year, qtr)
     info = _read_bulk_tsv(zp, 'INFOTABLE.tsv')
     cover = _read_bulk_tsv(zp, 'COVERPAGE.tsv')
     sub = _read_bulk_tsv(zp, 'SUBMISSION.tsv')
+
+    # Latest accession per filer
+    amend_subs = sub.filter(
+        pl.col('SUBMISSIONTYPE') == '13F-HR/A'
+    ).join(
+        cover.select(
+            'ACCESSION_NUMBER',
+            'FILINGMANAGER_NAME',
+        ),
+        on='ACCESSION_NUMBER',
+    )
+    latest_acc = (
+        amend_subs.sort('ACCESSION_NUMBER')
+        .group_by('FILINGMANAGER_NAME')
+        .last()
+        .select('ACCESSION_NUMBER')
+    )
+
+    # Restrict sub to only latest accessions
+    sub = sub.join(
+        latest_acc, on='ACCESSION_NUMBER',
+        how='semi',
+    )
+
     cusip_df = pl.DataFrame({
         'cusip': list(cusip_map.keys()),
         'symbol': list(cusip_map.values()),
@@ -173,22 +200,6 @@ def build_amendments(
 
     df = _to_holdings(
         info, cover, sub, cusip_df, ['13F-HR/A']
-    )
-
-    if df.height == 0:
-        _write_parquet(df, out)
-        return out
-
-    latest = (
-        df.group_by('holder')
-        .agg(pl.col('filing_date').max())
-        .select('holder', 'filing_date')
-    )
-
-    df = df.join(
-        latest,
-        on=['holder', 'filing_date'],
-        how='semi',
     )
 
     return _write_parquet(df, out)

@@ -130,6 +130,9 @@ class Trade:
     # 144 detail (preserved)
     nature: str = ''
     pct_outstanding: float = 0.0
+    # reg lock-up
+    lockup: bool = False
+    lockup_days: int = 0
 
 
 
@@ -153,6 +156,102 @@ def _build_cik_map(
     return m
 
 
+def build_144_trade(
+    filing: Filing,
+    raw: bytes,
+    cik_map: dict[str, RefRow],
+) -> Trade | None:
+    """Parse a 144 filing and build a Trade."""
+    d = parse_144(raw)
+    if not d or d.shares <= 0:
+        return None
+    ref = cik_map.get(filing.cik)
+    if not ref:
+        return None
+    implied = d.shares * ref.price
+    if implied < MIN_144_VALUE:
+        return None
+    pct = (
+        d.shares / d.outstanding
+        if d.outstanding > 0
+        else 0.0
+    )
+    return Trade(
+        symbol=ref.symbol,
+        date_filed=filing.date_filed,
+        shares=d.shares,
+        implied_value=implied,
+        price=ref.price,
+        price_source='ref',
+        filing_type='144',
+        seller=d.seller,
+        relationship=d.relationship,
+        underwriter=d.broker,
+        mkt_cap=ref.mkt_cap,
+        flagged_block=_flag_144_block(d),
+        nature=d.nature,
+        pct_outstanding=pct,
+    )
+
+
+def build_reg_trade(
+    filing: Filing,
+    raw: bytes,
+    cik_map: dict[str, RefRow],
+) -> Trade | None:
+    """Parse a reg offering and build a Trade."""
+    d = parse_reg(raw)
+    if not d or d.shares <= 0:
+        return None
+    ref = cik_map.get(filing.cik)
+    if not ref:
+        return None
+    px = (
+        d.offer_price
+        or d.last_price
+        or ref.price
+    )
+    px_src = (
+        'offer'
+        if d.offer_price
+        else ('last' if d.last_price else 'ref')
+    )
+    implied = (
+        d.total
+        if d.total
+        else d.shares * px
+    )
+    if implied < MIN_REG_VALUE:
+        return None
+    if implied > ref.mkt_cap * MAX_MCAP_PCT:
+        return None
+    return Trade(
+        symbol=ref.symbol,
+        date_filed=filing.date_filed,
+        shares=d.shares,
+        implied_value=implied,
+        price=px,
+        price_source=px_src,
+        filing_type=filing.form_type,
+        seller=(
+            'SEC'
+            if d.is_seller
+            else 'PRI'
+        ),
+        relationship=(
+            'selling stockholder'
+            if d.is_seller
+            else 'company'
+        ),
+        underwriter=d.underwriter,
+        mkt_cap=ref.mkt_cap,
+        flagged_block=d.is_bought,
+        is_ipo=d.is_ipo,
+        lockup=d.lockup,
+        lockup_days=d.lockup_days,
+    )
+
+
 def _scan_144(
     filings: list[Filing],
     cik_map: dict[str, RefRow],
@@ -168,36 +267,9 @@ def _scan_144(
     trades: list[Trade] = []
 
     def on_filing(f: Filing, raw: bytes) -> None:
-        d = parse_144(raw)
-        if not d or d.shares <= 0:
-            return
-        ref = cik_map[f.cik]
-        implied = d.shares * ref.price
-        if implied < MIN_144_VALUE:
-            return
-        pct = (
-            d.shares / d.outstanding
-            if d.outstanding > 0
-            else 0.0
-        )
-        trades.append(
-            Trade(
-                symbol=ref.symbol,
-                date_filed=f.date_filed,
-                shares=d.shares,
-                implied_value=implied,
-                price=ref.price,
-                price_source='ref',
-                filing_type='144',
-                seller=d.seller,
-                relationship=d.relationship,
-                underwriter=d.broker,
-                mkt_cap=ref.mkt_cap,
-                flagged_block=_flag_144_block(d),
-                nature=d.nature,
-                pct_outstanding=pct,
-            )
-        )
+        t = build_144_trade(f, raw, cik_map)
+        if t:
+            trades.append(t)
 
     asyncio.run(
         fetch_filings_async(matched, on_filing)
@@ -229,54 +301,9 @@ def _scan_reg(
     trades: list[Trade] = []
 
     def on_filing(f: Filing, raw: bytes) -> None:
-        d = parse_reg(raw)
-        if not d or d.shares <= 0:
-            return
-        ref = cik_map[f.cik]
-        px = (
-            d.offer_price
-            or d.last_price
-            or ref.price
-        )
-        px_src = (
-            'offer'
-            if d.offer_price
-            else ('last' if d.last_price else 'ref')
-        )
-        implied = (
-            d.total
-            if d.total
-            else d.shares * px
-        )
-        if implied < MIN_REG_VALUE:
-            return
-        if implied > ref.mkt_cap * MAX_MCAP_PCT:
-            return
-        trades.append(
-            Trade(
-                symbol=ref.symbol,
-                date_filed=f.date_filed,
-                shares=d.shares,
-                implied_value=implied,
-                price=px,
-                price_source=px_src,
-                filing_type=f.form_type,
-                seller=(
-                    'SEC'
-                    if d.is_seller
-                    else 'PRI'
-                ),
-                relationship=(
-                    'selling stockholder'
-                    if d.is_seller
-                    else 'company'
-                ),
-                underwriter=d.underwriter,
-                mkt_cap=ref.mkt_cap,
-                flagged_block=d.is_bought,
-                is_ipo=d.is_ipo,
-            )
-        )
+        t = build_reg_trade(f, raw, cik_map)
+        if t:
+            trades.append(t)
 
     asyncio.run(
         fetch_filings_async(reg, on_filing)

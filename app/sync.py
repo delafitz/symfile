@@ -38,6 +38,15 @@ from app.holdings.form4 import (
 from app.holdings.schedule13d import (
     upsert_13d,
 )
+from app.trades.hist import (
+    build_144_trade,
+    build_reg_trade,
+)
+from app.trades.table import upsert_trades
+from app.edgar.parse.reg import (
+    BANK_SYMS,
+    REG_FORMS,
+)
 from app.mds.syms import (
     load_cusips,
     load_syms,
@@ -52,6 +61,7 @@ from app.util.log import log
 
 WATCHED_PREFIXES = (
     '144',
+    '424B',
     '13F-HR/A',
     'SCHEDULE 13D',
     'SC 13D',
@@ -289,20 +299,38 @@ def sync(
     def is_form4(f):
         return f.form_type in ('4', '4/A')
 
+    def is_144(f):
+        return f.form_type.startswith('144')
+
+    def is_reg(f):
+        return (
+            f.form_type in REG_FORMS
+            and not (
+                f.form_type == '424B2'
+                and f.cik in bank_ciks
+            )
+        )
+
     syms = load_syms()
     sym_universe = set(syms.keys())
-    universe_ciks = set()
     from app.mds.massive.refs import (
         build_cik_map,
     )
-    for cik in build_cik_map(syms):
-        universe_ciks.add(cik)
+    cik_map = build_cik_map(syms)
+    universe_ciks = set(cik_map.keys())
+    bank_ciks = {
+        syms[s].cik.lstrip('0')
+        for s in BANK_SYMS
+        if s in syms
+    }
 
     to_process = [
         f for f in all_filings
         if f.form_type == '13F-HR/A'
         or is_13d(f)
         or (is_form4(f) and f.cik in universe_ciks)
+        or (is_144(f) and f.cik in universe_ciks)
+        or (is_reg(f) and f.cik in universe_ciks)
     ]
     if callback:
         to_process.extend(
@@ -310,10 +338,14 @@ def sync(
             if f.form_type != '13F-HR/A'
             and not is_13d(f)
             and not is_form4(f)
+            and not is_144(f)
+            and not is_reg(f)
         )
 
     if not to_process:
         return new
+
+    pending_trades = []
 
     def dispatch(f, raw):
         if f.form_type == '13F-HR/A':
@@ -334,6 +366,18 @@ def sync(
                     txns,
                     sym_universe,
                 )
+        elif is_144(f):
+            t = build_144_trade(
+                f, raw, cik_map
+            )
+            if t:
+                pending_trades.append(t)
+        elif is_reg(f):
+            t = build_reg_trade(
+                f, raw, cik_map
+            )
+            if t:
+                pending_trades.append(t)
         elif callback:
             callback(f, raw)
 
@@ -346,5 +390,8 @@ def sync(
             to_process, dispatch
         )
     )
+
+    if pending_trades:
+        upsert_trades(pending_trades)
 
     return new

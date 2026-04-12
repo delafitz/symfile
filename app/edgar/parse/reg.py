@@ -80,6 +80,27 @@ _SELLER_RE = re.compile(
     r'selling (?:stockholder|shareholder)'
 )
 
+# Lock-up: "X days after/following the date of this prospectus"
+_LOCKUP_DAYS_RE = re.compile(
+    r'(\d{2,3})[\s-]?days?\s+'
+    r'(?:after|following|from)\s+'
+    r'(?:the\s+)?(?:date\s+of\s+)?'
+    r'th(?:is|e)\s+prospectus',
+    re.IGNORECASE,
+)
+_LOCKUP_PERIOD_RE = re.compile(
+    r'period of\s+(\d{2,3})[\s-]?days?',
+    re.IGNORECASE,
+)
+_LOCKUP_RESTRICT_RE = re.compile(
+    r'(\d{2,3})[\s-]?day\s+'
+    r'(?:restricted|lock[\s-]?up)',
+    re.IGNORECASE,
+)
+_LOCKUP_HEADER_RE = re.compile(
+    r'\b[Ll]ock[\s-]?[Uu]p\s+[Aa]greements?\b'
+)
+
 
 @dataclass
 class FilingReg:
@@ -91,6 +112,8 @@ class FilingReg:
     is_bought: bool  # underwriter bought the shares
     is_ipo: bool
     underwriter: str
+    lockup: bool = False
+    lockup_days: int = 0
 
 
 def _strip_html(text: str) -> str:
@@ -224,6 +247,26 @@ def parse_reg(
 
     underwriter = _find_underwriters(clean)
 
+    # Lock-up extraction
+    lockup = False
+    lockup_days = 0
+    lm = _LOCKUP_HEADER_RE.search(clean)
+    if lm:
+        lockup = True
+        win = clean[
+            max(0, lm.start() - 500) :
+            lm.start() + 3000
+        ]
+        dm = (
+            _LOCKUP_DAYS_RE.search(win)
+            or _LOCKUP_PERIOD_RE.search(win)
+            or _LOCKUP_RESTRICT_RE.search(win)
+        )
+        if dm:
+            d = int(dm.group(1))
+            if 30 <= d <= 365:
+                lockup_days = d
+
     return FilingReg(
         shares=shares,
         offer_price=price,
@@ -233,4 +276,6 @@ def parse_reg(
         is_bought=is_bought,
         is_ipo=is_ipo,
         underwriter=underwriter,
+        lockup=lockup,
+        lockup_days=lockup_days,
     )

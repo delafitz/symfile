@@ -137,6 +137,7 @@ def scan(
     """Scan for block trades (144 + reg)."""
     from app.mds.syms import load_syms
     from app.trades.hist import get_trades
+    from app.trades.table import upsert_trades
 
     syms = load_syms()
 
@@ -162,9 +163,11 @@ def scan(
         symbol=symbol.upper() if symbol else None,
         types=types,
     )
+
+    added = upsert_trades(trades)
     trades.sort(key=lambda t: -t.implied_value)
 
-    print(f'\n{len(trades)} trades')
+    print(f'\n{len(trades)} trades ({added} new)')
     print(
         f'\n{"SYM":<6s} {"DATE":<12s} '
         f'{"TYPE":<8s} {"SHARES":>12s} '

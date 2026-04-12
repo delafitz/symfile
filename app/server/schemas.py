@@ -34,3 +34,26 @@ class HoldersResponse(BaseModel):
     adds: list[HolderRow]
     subs: list[HolderRow]
     summary: HoldersSummary
+
+
+class TradeRow(BaseModel):
+    symbol: str
+    date_filed: str
+    shares: int
+    implied_value_mm: float
+    price: float
+    price_source: str
+    filing_type: str
+    seller: str
+    relationship: str
+    underwriter: str
+    mkt_cap_b: float
+    flagged_block: bool
+    is_ipo: bool
+    lockup: bool
+    lockup_days: int
+
+
+class TradesResponse(BaseModel):
+    trades: list[TradeRow]
+    total: int

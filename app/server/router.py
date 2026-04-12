@@ -8,6 +8,8 @@ from app.server.schemas import (
     HoldersResponse,
     HoldersSummary,
     SymbolMeta,
+    TradeRow,
+    TradesResponse,
 )
 from app.util.names import short_name
 
@@ -171,3 +173,56 @@ async def get_holders(
     if cache.syms is None or symbol not in cache.syms:
         return {'error': f'{symbol} not in universe'}
     return _build_holders(cache, symbol, n)
+
+
+@router.get(
+    '/trades',
+    response_model=TradesResponse,
+    tags=['trades'],
+)
+async def get_trades(
+    request: Request,
+    symbol: str | None = None,
+    count: int = 10,
+    from_date: str | None = None,
+):
+    df = request.state.cache.trades
+    if df is None or df.height == 0:
+        return TradesResponse(trades=[], total=0)
+
+    if symbol:
+        df = df.filter(
+            pl.col('symbol') == symbol.upper()
+        )
+    if from_date:
+        df = df.filter(
+            pl.col('date_filed') >= from_date
+        )
+
+    df = df.sort('date_filed', descending=True)
+    total = df.height
+    df = df.head(count)
+
+    trades = [
+        TradeRow(
+            symbol=r['symbol'],
+            date_filed=r['date_filed'],
+            shares=r['shares'],
+            implied_value_mm=round(
+                r['implied_value'] / 1e6, 1
+            ),
+            price=r['price'],
+            price_source=r['price_source'],
+            filing_type=r['filing_type'],
+            seller=r['seller'],
+            relationship=r['relationship'],
+            underwriter=r['underwriter'],
+            mkt_cap_b=round(r['mkt_cap'] / 1e9, 1),
+            flagged_block=r['flagged_block'],
+            is_ipo=r['is_ipo'],
+            lockup=r['lockup'] or False,
+            lockup_days=r['lockup_days'] or 0,
+        )
+        for r in df.to_dicts()
+    ]
+    return TradesResponse(trades=trades, total=total)
