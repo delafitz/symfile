@@ -23,6 +23,7 @@ class Filing4:
     shares_txn: int
     acquired: bool
     post_shares: int
+    txn_price: float
 
 
 def _find(node, path: str) -> str:
@@ -139,6 +140,14 @@ def parse_form4(
                 '/value',
             )
         )
+        price_val = _parse_float(
+            _find(
+                txn,
+                'transactionAmounts'
+                '/transactionPricePerShare'
+                '/value',
+            )
+        )
 
         results.append(
             Filing4(
@@ -152,6 +161,7 @@ def parse_form4(
                 shares_txn=int(shares_val),
                 acquired=ad == 'A',
                 post_shares=int(post_val),
+                txn_price=price_val,
             )
         )
 

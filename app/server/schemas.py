@@ -57,3 +57,29 @@ class TradeRow(BaseModel):
 class TradesResponse(BaseModel):
     trades: list[TradeRow]
     total: int
+
+
+class BlockRow(BaseModel):
+    symbol: str
+    date_filed: str
+    pricing_date: str
+    trade_date: str
+    shares: int
+    notional_mm: float
+    offer_price: float
+    price_source: str
+    filing_type: str
+    is_reg: bool
+    is_primary: bool
+    seller: str
+    relationship: str
+    banks: list[str]
+    is_ipo: bool
+    lockup: bool
+    lockup_days: int
+    source: str
+
+
+class BlocksResponse(BaseModel):
+    blocks: list[BlockRow]
+    total: int

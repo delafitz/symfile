@@ -152,7 +152,8 @@ def load_cusips(
         return {}
 
     log.info('resolving cusips', cusips=len(cusips), universe=len(universe))
-    mapping = asyncio.run(
+    from app.util.asyncio import run_coro
+    mapping = run_coro(
         _fetch_cusips_async(cusips, universe)
     )
     _save(mapping)

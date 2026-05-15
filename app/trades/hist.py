@@ -37,12 +37,17 @@ from app.edgar.parse.reg import (
     parse_reg,
 )
 from app.mds.massive.refs import RefRow
+from app.trades.banks import OTHER, parse_banks
 from app.util.log import log
 
 MIN_144_VALUE = 25_000_000
 MIN_REG_VALUE = 50_000_000
 MAX_MCAP_PCT = 0.20  # reject if > 20% of mkt_cap
-MIN_BLOCK_PCT = 0.01  # >= 1% of outstanding
+
+# Flag thresholds — OR'd together
+BLOCK_NOTIONAL = 50_000_000
+BLOCK_PCT_OUTSTANDING = 0.01
+BLOCK_PCT_ADV = 0.5
 
 # Comp-sale nature keywords (case-insensitive)
 _COMP_RE = re.compile(
@@ -53,63 +58,75 @@ _COMP_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Institutional broker patterns
+# Major-bank broker whitelist — matches any brand
+# variant associated with a top-tier institution,
+# including their wealth-management arms (we no
+# longer reject retail-branded channels; sales
+# through a major bank's wealth desk are still
+# block-adjacent when size/liquidity say so).
 _INST_BROKER_RE = re.compile(
-    r'Goldman Sachs & Co'
-    r'|Morgan Stanley & Co'
-    r'|J\.?P\.? ?Morgan Securities'
-    r'|BofA Securities'
-    r'|Barclays Capital'
-    r'|Citigroup Global'
+    r'Goldman Sachs'
+    r'|Morgan Stanley'
+    r'|Smith Barney'
+    r'|Merrill Lynch'
+    r'|BofA'
+    r'|Bank of America'
+    r'|Citi(group)?'
+    r'|J\.?P\.? ?Morgan'
+    r'|JPMorgan'
+    r'|Barclays'
     r'|RBC Capital'
-    r'|Jefferies LLC'
-    r'|UBS Securities'
-    r'|Deutsche Bank Securities'
-    r'|BMO Capital',
-    re.IGNORECASE,
-)
-
-# Retail/wealth broker markers (disqualify)
-_RETAIL_RE = re.compile(
-    r'Smith Barney|Executive Financial'
-    r'|Fidelity|Schwab|Pershing'
-    r'|Merrill Lynch|E\*TRADE|Vanguard'
-    r'|TD Ameritrade|Interactive Brokers',
+    r'|Jefferies'
+    r'|UBS'
+    r'|Deutsche Bank'
+    r'|BMO',
     re.IGNORECASE,
 )
 
 
 def _flag_144_block(
     d: Filing144,
+    ref: RefRow,
 ) -> bool:
     """Heuristic: is this 144 filing a block trade?
 
-    Signals (any two = flagged):
-      - institutional broker (not retail/wealth)
-      - nature is NOT comp (RSU/option/vest/etc.)
-      - shares >= 1% of outstanding
+    Requires a known-bank broker (anything in our
+    BANKS dict), notional >= $50M, AND a size-relative
+    signal (>=0.5% of float OR >=50% of ADV). The
+    size-relative gate filters megacap insider noise:
+    a $78M sale by a Google officer is 0.002% of float
+    and not a block in any meaningful sense.
     """
-    score = 0
+    if not d.broker:
+        return False
+    parsed = parse_banks(d.broker)
+    if not parsed or parsed == [OTHER]:
+        return False
 
-    # Broker signal
-    if d.broker:
-        if _RETAIL_RE.search(d.broker):
-            pass  # retail = 0
-        elif _INST_BROKER_RE.search(d.broker):
-            score += 1
+    pct_out = (
+        d.shares / d.outstanding
+        if d.outstanding > 0 else 0.0
+    )
+    pct_adv = (
+        d.shares / ref.adv
+        if ref.adv > 0 else 0.0
+    )
+    notional = d.shares * ref.price
 
-    # Nature signal
-    if d.nature and not _COMP_RE.search(d.nature):
-        score += 1
-
-    # Size signal (% of outstanding)
+    # 1) Significant stake — sponsor / 5%+ holder exit
+    if pct_out >= BLOCK_PCT_OUTSTANDING:
+        return True
+    # 2) Single-day liquidity event
+    if pct_adv >= BLOCK_PCT_ADV:
+        return True
+    # 3) Big notional, but require a non-trivial stake
+    #    (>=0.5%) to filter megacap insider noise
     if (
-        d.outstanding > 0
-        and d.shares / d.outstanding >= MIN_BLOCK_PCT
+        notional >= BLOCK_NOTIONAL
+        and pct_out >= BLOCK_PCT_OUTSTANDING / 2
     ):
-        score += 1
-
-    return score >= 2
+        return True
+    return False
 
 
 @dataclass
@@ -127,6 +144,7 @@ class Trade:
     mkt_cap: float
     flagged_block: bool = False
     is_ipo: bool = False
+    trade_date: str = ''  # approx sale/pricing date
     # 144 detail (preserved)
     nature: str = ''
     pct_outstanding: float = 0.0
@@ -165,6 +183,9 @@ def build_144_trade(
     d = parse_144(raw)
     if not d or d.shares <= 0:
         return None
+    # Drop comp sales (RSU/option/vest/etc.)
+    if d.nature and _COMP_RE.search(d.nature):
+        return None
     ref = cik_map.get(filing.cik)
     if not ref:
         return None
@@ -188,7 +209,8 @@ def build_144_trade(
         relationship=d.relationship,
         underwriter=d.broker,
         mkt_cap=ref.mkt_cap,
-        flagged_block=_flag_144_block(d),
+        flagged_block=_flag_144_block(d, ref),
+        trade_date=d.sale_date,
         nature=d.nature,
         pct_outstanding=pct,
     )
@@ -247,6 +269,7 @@ def build_reg_trade(
         mkt_cap=ref.mkt_cap,
         flagged_block=d.is_bought,
         is_ipo=d.is_ipo,
+        trade_date=filing.date_filed,
         lockup=d.lockup,
         lockup_days=d.lockup_days,
     )

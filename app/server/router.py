@@ -8,6 +8,8 @@ from app.server.schemas import (
     HoldersResponse,
     HoldersSummary,
     SymbolMeta,
+    BlockRow,
+    BlocksResponse,
     TradeRow,
     TradesResponse,
 )
@@ -226,3 +228,61 @@ async def get_trades(
         for r in df.to_dicts()
     ]
     return TradesResponse(trades=trades, total=total)
+
+
+@router.get(
+    '/blocks',
+    response_model=BlocksResponse,
+    tags=['trades'],
+)
+async def get_blocks(
+    request: Request,
+    symbol: str | None = None,
+    count: int = 10,
+    from_date: str | None = None,
+):
+    df = request.state.cache.blocks
+    if df is None or df.height == 0:
+        return BlocksResponse(blocks=[], total=0)
+
+    if symbol:
+        df = df.filter(
+            pl.col('symbol') == symbol.upper()
+        )
+    if from_date:
+        df = df.filter(
+            pl.col('date_filed') >= from_date
+        )
+
+    df = df.sort('date_filed', descending=True)
+    total = df.height
+    df = df.head(count)
+
+    blocks = [
+        BlockRow(
+            symbol=r['symbol'],
+            date_filed=r['date_filed'],
+            pricing_date=(
+                r['pricing_date'] or r['date_filed']
+            ),
+            trade_date=r['trade_date'] or '',
+            shares=r['shares'],
+            notional_mm=round(
+                (r['notional'] or 0) / 1e6, 1
+            ),
+            offer_price=r['offer_price'] or 0,
+            price_source=r['price_source'] or '',
+            filing_type=r['filing_type'],
+            is_reg=r['filing_type'] != '144',
+            is_primary=bool(r['is_primary']),
+            seller=r['seller'] or '',
+            relationship=r['relationship'] or '',
+            banks=r['banks'] or [],
+            is_ipo=r['is_ipo'] or False,
+            lockup=r['lockup'] or False,
+            lockup_days=r['lockup_days'] or 0,
+            source=r['source'] or '',
+        )
+        for r in df.to_dicts()
+    ]
+    return BlocksResponse(blocks=blocks, total=total)

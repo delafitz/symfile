@@ -80,12 +80,27 @@ def _is_watched(form_type: str) -> bool:
 
 def init_mds() -> dict:
     """Ensure all market data caches are fresh."""
+    from app.mds.massive.adv import load_adv
+
     log.info('init mds')
     tickers = load_tickers()
     syms = load_syms()
     cusip_map = load_cusips()
+    adv = load_adv(build=True)
 
-    log.info('mds loaded', tickers=len(tickers), syms=len(syms), cusips=len(cusip_map))
+    log.info(
+        'mds loaded',
+        tickers=len(tickers),
+        syms=len(syms),
+        cusips=len(cusip_map),
+        adv=len(adv),
+    )
+
+    # Re-merge fresh ADV into syms (load_syms may
+    # have seen a stale/empty cache).
+    for s, v in adv.items():
+        if s in syms:
+            syms[s].adv = v
 
     log.info('init holdings')
     build_all(cusip_map)
@@ -364,6 +379,7 @@ def sync(
                 upsert_form4(
                     f.date_filed,
                     txns,
+                    cik_map,
                     sym_universe,
                 )
         elif is_144(f):
@@ -393,5 +409,14 @@ def sync(
 
     if pending_trades:
         upsert_trades(pending_trades)
+
+    # Promote any newly-qualifying Form 4 sales into
+    # trades.parquet (size-relative block heuristic)
+    from app.trades.form4_block import (
+        build_form4_trades,
+    )
+    f4_trades = build_form4_trades(syms)
+    if f4_trades:
+        upsert_trades(f4_trades)
 
     return new

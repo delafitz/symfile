@@ -206,6 +206,19 @@ def parse_reg(
     if 'may from time to time' in low[:3000]:
         return None
 
+    # Reject preferred / trust-preferred / depositary
+    # offerings (not common-stock blocks). Scope to the
+    # first 3000 chars where the offering title sits;
+    # avoids false-rejecting common-stock filings that
+    # mention these phrases in cross-references later.
+    title = low[:3000]
+    if (
+        'depositary shares' in title
+        or 'trust preferred' in title
+        or 'series of preferred' in title
+    ):
+        return None
+
     # Extract share count
     m = _SHARES_RE.search(clean[:5000])
     if not m:
@@ -218,11 +231,32 @@ def parse_reg(
         _SELLER_RE.search(low[:5000])
     )
 
-    # Bought deal: underwriter purchased shares
-    low_full = clean[:20000].lower()
-    is_bought = 'agreed to purchase' in low_full
+    # Bought deal: underwriter took shares as principal.
+    # The firm-commitment language sits in the
+    # "Underwriting" section, typically 25K-150K chars
+    # in for resale prospectuses (424B7), so scan the
+    # full body. Multiple phrasings cover variations:
+    #   "agreed to purchase"        — typical SPO/SPB
+    #   "severally agreed..."       — multi-bank syndicate
+    #   "committed to purchase"     — sole-underwriter
+    #   "underwriter is committed"  — same, alt phrasing
+    low_full = clean.lower()
+    is_bought = (
+        'agreed to purchase' in low_full
+        or 'committed to purchase' in low_full
+        or 'underwriter is committed' in low_full
+        or 'underwriter purchases the shares' in low_full
+        or 'underwriters purchase the shares' in low_full
+    )
+    # Contra: co-manager structure indicates a marketed
+    # offering with a syndicate, not an overnight block.
+    # Real blocks use a sole underwriter or one or two
+    # joint book-runners with no co-managers.
+    if 'co-manager' in low_full:
+        is_bought = False
+    # IPO marker — only meaningful in the cover page
     is_ipo = (
-        'initial public offering' in low_full
+        'initial public offering' in clean[:20000].lower()
     )
 
     # Offer price

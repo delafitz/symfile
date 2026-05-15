@@ -35,6 +35,7 @@ SCHEMA = {
     'mkt_cap': pl.Float64,
     'flagged_block': pl.Boolean,
     'is_ipo': pl.Boolean,
+    'trade_date': pl.Utf8,
     'nature': pl.Utf8,
     'pct_outstanding': pl.Float64,
     'lockup': pl.Boolean,

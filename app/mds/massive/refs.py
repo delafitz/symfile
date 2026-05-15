@@ -32,6 +32,7 @@ class RefRow:
     name: str
     mkt_cap: float
     price: float
+    adv: float = 0.0
 
 
 def _find_cached() -> tuple[Path, date] | None:
@@ -200,7 +201,8 @@ def load_refs(
         tickers = load_tickers()
 
     log.info('building refs')
-    rows = asyncio.run(_fetch_refs_async(tickers))
+    from app.util.asyncio import run_coro
+    rows = run_coro(_fetch_refs_async(tickers))
     _save(rows)
     return {r.symbol: r for r in rows}
 

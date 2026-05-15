@@ -48,6 +48,15 @@ def refs() -> None:
 
 
 @app.command()
+def adv() -> None:
+    """Build/refresh 30-day ADV cache."""
+    from app.mds.massive.adv import load_adv
+
+    result = load_adv(build=True)
+    print(f'{len(result)} symbols')
+
+
+@app.command()
 def cusips() -> None:
     """Build CUSIP->symbol map from 13F bulk zips."""
     from app.edgar.bulk13f import (
@@ -277,6 +286,50 @@ def backfill_13d() -> None:
         symbols=deduped.n_unique('symbol'),
         holders=deduped.n_unique('holder'),
     )
+
+
+@app.command()
+def reprocess_form4(
+    year: Annotated[
+        int,
+        typer.Option(
+            '--year',
+            help='Restrict to one year (default: 2026 YTD)',
+        ),
+    ] = 2026,
+) -> None:
+    """Reparse cached Form 4s and rebuild form4.parquet."""
+    from app.holdings.form4 import reprocess_cached
+    from app.mds.massive.refs import build_cik_map
+    from app.mds.syms import load_syms
+
+    syms = load_syms()
+    cik_map = build_cik_map(syms)
+    n = reprocess_cached(cik_map, year=year)
+    print(f'{n} rows')
+
+
+@app.command()
+def flag_form4() -> None:
+    """Promote large Form 4 sales into trades.parquet."""
+    from app.mds.syms import load_syms
+    from app.trades.form4_block import (
+        build_form4_trades,
+    )
+    from app.trades.table import upsert_trades
+
+    syms = load_syms()
+    trades = build_form4_trades(syms)
+    added = upsert_trades(trades)
+    print(f'{len(trades)} candidates, {added} new')
+
+
+@app.command()
+def review() -> None:
+    """Review flagged trades and confirm blocks."""
+    from app.trades.review import review_trades
+
+    review_trades()
 
 
 @app.command()
