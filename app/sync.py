@@ -344,7 +344,7 @@ def sync(
         if f.form_type == '13F-HR/A'
         or is_13d(f)
         or (is_form4(f) and f.cik in universe_ciks)
-        or (is_144(f) and f.cik in universe_ciks)
+        or is_144(f)
         or (is_reg(f) and f.cik in universe_ciks)
     ]
     if callback:

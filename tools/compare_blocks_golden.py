@@ -95,7 +95,9 @@ def load_golden() -> pl.DataFrame:
         rows.append({
             'symbol': (r['Ticker'] or '').upper(),
             'trade_date': _parse_date(r.get('TradeDt')),
-            'pricing_date': _parse_date(r.get('PxDt')),
+            'pricing_date': _parse_date(
+                r.get('PxDt') or r.get('PriceDt')
+            ),
             'shares': r.get('Shares') or 0,
             'offer_price': r.get('OfferPx'),
             'net_price': r.get('NetPx'),

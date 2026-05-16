@@ -248,12 +248,6 @@ def parse_reg(
         or 'underwriter purchases the shares' in low_full
         or 'underwriters purchase the shares' in low_full
     )
-    # Contra: co-manager structure indicates a marketed
-    # offering with a syndicate, not an overnight block.
-    # Real blocks use a sole underwriter or one or two
-    # joint book-runners with no co-managers.
-    if 'co-manager' in low_full:
-        is_bought = False
     # IPO marker — only meaningful in the cover page
     is_ipo = (
         'initial public offering' in clean[:20000].lower()

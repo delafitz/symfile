@@ -179,14 +179,23 @@ def build_144_trade(
     raw: bytes,
     cik_map: dict[str, RefRow],
 ) -> Trade | None:
-    """Parse a 144 filing and build a Trade."""
+    """Parse a 144 filing and build a Trade.
+
+    144s are filed by the SELLER (often an insider or
+    sponsor outside our universe), so we resolve the
+    issuer via the parsed XML's issuerCik rather than
+    the filer's index CIK.
+    """
     d = parse_144(raw)
     if not d or d.shares <= 0:
         return None
     # Drop comp sales (RSU/option/vest/etc.)
     if d.nature and _COMP_RE.search(d.nature):
         return None
-    ref = cik_map.get(filing.cik)
+    issuer_key = (
+        d.issuer_cik.lstrip('0') or '0'
+    ) if d.issuer_cik else filing.cik
+    ref = cik_map.get(issuer_key)
     if not ref:
         return None
     implied = d.shares * ref.price
@@ -279,12 +288,14 @@ def _scan_144(
     filings: list[Filing],
     cik_map: dict[str, RefRow],
 ) -> list[Trade]:
-    """Scan 144 filings, return qualifying trades."""
+    """Scan 144 filings, return qualifying trades.
+
+    Can't pre-filter on f.cik (the filer is usually
+    the seller, not the issuer). Fetch all 144s and
+    let build_144_trade resolve issuer at parse time.
+    """
     f144 = filter_forms(filings, ('144',))
-    matched = [
-        f for f in f144 if f.cik in cik_map
-    ]
-    if not matched:
+    if not f144:
         return []
 
     trades: list[Trade] = []
@@ -295,7 +306,7 @@ def _scan_144(
             trades.append(t)
 
     asyncio.run(
-        fetch_filings_async(matched, on_filing)
+        fetch_filings_async(f144, on_filing)
     )
     return trades
 

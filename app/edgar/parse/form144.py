@@ -14,6 +14,8 @@ _NS_RE = re.compile(r'\{[^}]+\}')
 
 @dataclass
 class Filing144:
+    issuer_cik: str
+    issuer_name: str
     seller: str
     relationship: str
     title: str
@@ -91,6 +93,8 @@ def parse_144(
                 )
         return results
 
+    issuer_cik = find('formData/issuerInfo/issuerCik')
+    issuer_name = find('formData/issuerInfo/issuerName')
     seller = find(
         'formData/issuerInfo'
         '/nameOfPersonForWhoseAccount'
@@ -151,6 +155,8 @@ def parse_144(
         mkt_value = 0.0
 
     return Filing144(
+        issuer_cik=issuer_cik,
+        issuer_name=issuer_name,
         seller=seller,
         relationship=', '.join(rels),
         title=title,
