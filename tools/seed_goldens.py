@@ -72,8 +72,8 @@ def _split_cols(symbol: str, pdt, shares: int, px: float) -> dict:
     f = cumulative_factor(symbol, pdt)
     return {
         'split_factor': float(f),
-        'shares_adjusted': int(round(shares * f)),
-        'offer_price_adjusted': float(px / f),
+        'adj_shares': int(round(shares * f)),
+        'adj_price': float(px / f),
     }
 
 

@@ -33,13 +33,16 @@ SCHEMA = {
     'intraday':     pl.Boolean,
     'shares':       pl.Int64,       # as-filed
     'notional':     pl.Float64,     # shares * offer_price
-    # ---- Split adjustment (today's basis) ----
-    # cumulative factor from price_date forward.
-    # split_factor > 1 -> forward split since;
-    # < 1 -> reverse split; = 1 -> no split.
-    'split_factor':         pl.Float64,
-    'shares_adjusted':      pl.Int64,   # shares * factor
-    'offer_price_adjusted': pl.Float64, # offer_price / factor
+    # ---- Split-adjusted (today's basis) ----
+    # Backtests/analytics should use these fields —
+    # they reflect current share prices and counts so
+    # cross-deal comparisons stay apples-to-apples.
+    # split_factor: cumulative factor from price_date
+    # forward. >1 = forward split since; <1 = reverse;
+    # =1 = no split.
+    'split_factor': pl.Float64,
+    'adj_shares':   pl.Int64,    # shares * split_factor
+    'adj_price':    pl.Float64,  # offer_price / split_factor
     # ---- Seller ----
     'seller':       pl.Utf8,
     'relationship': pl.Utf8,

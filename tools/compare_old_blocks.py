@@ -130,7 +130,7 @@ def main() -> None:
         c['matched'] += 1
         # OfferPx — prefer split-adjusted to match legacy
         lpx = l.get('OfferPx')
-        opx = o.get('offer_price_adjusted') or o.get('offer_price')
+        opx = o.get('adj_price') or o.get('offer_price')
         if lpx is not None and opx is not None and opx > 0:
             d = abs(opx - lpx) / lpx
             px_diffs.append((d, k, lpx, opx))
@@ -146,7 +146,7 @@ def main() -> None:
             c['px_missing'] += 1
         # Shares — adjusted to match legacy split basis
         lsh = l.get('Shares')
-        osh = o.get('shares_adjusted') or o.get('shares')
+        osh = o.get('adj_shares') or o.get('shares')
         if lsh and osh and osh > 0:
             d = abs(osh - lsh) / lsh
             sh_diffs.append((d, k, lsh, osh))
