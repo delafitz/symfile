@@ -48,6 +48,31 @@ UNREG_GOLDEN = Path('data/bootstrap/unreg_golden.20260517.json')
 REG_LABELS = Path('data/corpus/reg_labels.parquet')
 REG_CORPUS = Path('data/corpus/reg_corpus.parquet')
 INDEX_DIR = Path('data/indices')
+# Manual gross-price overrides for bought-deal block
+# reg filings (the filing only states the net to seller;
+# the public reoffer price is outside the document).
+BLOCK_OFFER_PX = Path('data/bootstrap/block_deals_for_offerpx.csv')
+
+
+def _load_block_offer_px() -> dict[tuple[str, str], float]:
+    """(Ticker, PriceDt) -> gross OfferPx override."""
+    import csv
+    out: dict[tuple[str, str], float] = {}
+    if not BLOCK_OFFER_PX.exists():
+        return out
+    with BLOCK_OFFER_PX.open() as fh:
+        for r in csv.DictReader(fh):
+            px = r.get('OfferPx')
+            if not px:
+                continue
+            try:
+                out[(r['Ticker'], r['PriceDt'])] = float(px)
+            except ValueError:
+                continue
+    return out
+
+
+_BLOCK_OVERRIDES = _load_block_offer_px()
 
 
 def _parse_golden_date(s: str) -> date | None:
@@ -88,7 +113,23 @@ def _row_from_reg_deal(deal, golden) -> dict | None:
     if pdt is None:
         return None
 
-    notional = deal.shares_offered * deal.offer_price
+    sym = deal.symbol or golden['Ticker']
+    # For bought-deal blocks the filing only states the
+    # net price (what the underwriter paid the seller).
+    # The public reoffer / gross OfferPx is captured
+    # manually in data/bootstrap/block_deals_for_offerpx.csv
+    # and overrides the parsed value here.
+    override = _BLOCK_OVERRIDES.get(
+        (golden['Ticker'], golden['PriceDt'])
+    )
+    if override:
+        offer_price = float(override)
+        evidence = 'golden+parser+override'
+    else:
+        offer_price = float(deal.offer_price)
+        evidence = 'golden+parser'
+
+    notional = deal.shares_offered * offer_price
     banks = (
         parse_banks(deal.underwriter)
         if deal.underwriter else []
@@ -100,11 +141,10 @@ def _row_from_reg_deal(deal, golden) -> dict | None:
         if deal.has_selling_stockholder
         else 'company'
     )
-    sym = deal.symbol or golden['Ticker']
     return {
         'price_date': pdt,
         'symbol': sym,
-        'offer_price': float(deal.offer_price),
+        'offer_price': offer_price,
         'type': 'Reg',
         'trade_date': pdt,
         'intraday': False,
@@ -113,13 +153,13 @@ def _row_from_reg_deal(deal, golden) -> dict | None:
         **_split_cols(
             sym, pdt,
             deal.shares_offered,
-            deal.offer_price,
+            offer_price,
         ),
         'seller': deal.issuer_name or '',
         'relationship': seller_rel,
         'banks': banks,
         'cik': deal.cik,
-        'evidence': 'golden+parser',
+        'evidence': evidence,
         'source': REG_GOLDEN.name,
     }
 
