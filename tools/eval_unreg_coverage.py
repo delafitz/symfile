@@ -41,10 +41,17 @@ def _parse_golden_date(s: str) -> date | None:
 
 
 def _parse_iso(s: str) -> date | None:
+    """EDGAR full indices use YYYY-MM-DD; dailies YYYYMMDD."""
+    if not s:
+        return None
     try:
-        return date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+        if len(s) >= 10 and s[4] == '-':
+            return date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+        if len(s) == 8 and s.isdigit():
+            return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
     except (ValueError, IndexError):
         return None
+    return None
 
 
 def _load_index_by_cik() -> dict[str, list[tuple[date, str, str]]]:

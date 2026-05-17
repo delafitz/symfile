@@ -121,10 +121,18 @@ def _parse_golden_date(s: str) -> date | None:
 
 
 def _parse_iso(s: str) -> date | None:
+    """Parse an EDGAR index date. Full quarterly indices
+    use YYYY-MM-DD; daily indices use YYYYMMDD (no dashes)."""
+    if not s:
+        return None
     try:
-        return date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+        if len(s) >= 10 and s[4] == '-':
+            return date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+        if len(s) == 8 and s.isdigit():
+            return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
     except (ValueError, IndexError, TypeError):
         return None
+    return None
 
 
 # ----- Reg seeding -----
