@@ -194,9 +194,21 @@ def _row_from_unreg(deal, golden) -> dict | None:
     shares = deal.block_shares if deal else 0
     notional = shares * px if shares else 0.0
 
-    # Seller / relationship — pull a best-guess name
+    # Seller: top entity by aggregated size; join the
+    # next few with semicolons for cluster sellers.
     seller_name = ''
+    if deal and deal.sellers:
+        seller_name = '; '.join(deal.sellers[:5])
+    # Relationship: 144-derived sellers are typically
+    # "affiliate" (control/restricted), Form 4-only is
+    # "insider". Both can coexist.
     relationship = ''
+    if deal:
+        if deal.n_144 > 0:
+            relationship = 'affiliate'
+        elif deal.n_form4 > 0:
+            relationship = 'insider'
+
     return {
         'price_date': pdt,
         'symbol': golden['Ticker'],

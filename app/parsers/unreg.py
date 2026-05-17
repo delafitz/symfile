@@ -45,6 +45,9 @@ class UnregDeal:
     f144_shares: int = 0
     f144_mkt_value: float = 0.0
 
+    # Seller names (deduped, ordered by largest size)
+    sellers: list[str] = field(default_factory=list)
+
     @property
     def f144_price(self) -> float:
         """Implicit market-reference price from the 144."""
@@ -151,11 +154,34 @@ def resolve_unreg_deal(
     d.n_form4 = len(form4_txns)
 
     # --- 144 aggregation ---
+    seller_sizes: dict[str, int] = {}
     for f in f144_filings:
         if f.shares > 0:
             d.f144_shares += f.shares
+            if f.seller:
+                seller_sizes[f.seller] = (
+                    seller_sizes.get(f.seller, 0) + f.shares
+                )
         if f.mkt_value > 0:
             d.f144_mkt_value += f.mkt_value
     d.n_144 = len(f144_filings)
+
+    # Fall back to Form 4 reporter names when no 144s
+    if not seller_sizes:
+        for t in relevant:
+            if not t.reporter:
+                continue
+            seller_sizes[t.reporter] = (
+                seller_sizes.get(t.reporter, 0)
+                + t.shares_txn
+            )
+
+    # Sort sellers by aggregate shares (largest first)
+    d.sellers = [
+        s for s, _ in sorted(
+            seller_sizes.items(),
+            key=lambda kv: -kv[1],
+        )
+    ]
 
     return d

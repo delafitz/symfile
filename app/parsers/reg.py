@@ -468,6 +468,12 @@ def _is_non_equity(low: str) -> bool:
     return False
 
 
+_HEADER_NAME_RE = re.compile(
+    r'COMPANY CONFORMED NAME:\s*([^\n]+)',
+    re.IGNORECASE,
+)
+
+
 def parse_supplement(
     raw: bytes, form_type: str,
 ) -> RegFiling | None:
@@ -484,6 +490,12 @@ def parse_supplement(
         return None
 
     f = RegFiling(form_type=form_type)
+    # Issuer name comes from the SGML header — pull
+    # from the raw text before HTML stripping so we
+    # don't depend on a noisy cover page.
+    hm = _HEADER_NAME_RE.search(text[:5000])
+    if hm:
+        f.issuer_name = hm.group(1).strip()
     f.shares_offered = find_title_shares(clean)
     if f.shares_offered == 0:
         f.missing.append('shares_offered')
