@@ -51,6 +51,11 @@ INDEX_DIR = Path('data/indices')
 # Direct-from-legacy seed for blocks with no SEC filing
 # (foreign issuers like GFL/TMUS/CIGI etc.)
 LEGACY_SEED = Path('data/bootstrap/legacy_seed.csv')
+# Reference dataset used to fill in `shares` for unreg
+# rows we couldn't extract from SEC filings (Rule 144A,
+# foreign-private issuers, etc.). Looked up by
+# (cik, PxDt) so CCCS<->CCC ticker renames resolve.
+LEGACY_BLOCKS = Path('data/bootstrap/block_trades.20260321.json')
 
 # Legacy uses shorthand bank codes; map to our canonical
 # keys (compare_old_blocks.py shares this convention).
@@ -86,6 +91,26 @@ def _load_block_offer_px() -> dict[tuple[str, str], float]:
 
 
 _BLOCK_OVERRIDES = _load_block_offer_px()
+
+
+def _load_legacy_shares() -> dict[tuple[str, str], int]:
+    """(cik_unpadded, PxDt) -> Shares from legacy json."""
+    if not LEGACY_BLOCKS.exists():
+        return {}
+    legacy = json.loads(LEGACY_BLOCKS.read_text())
+    out: dict[tuple[str, str], int] = {}
+    for r in legacy:
+        cik = resolve_cik(r.get('Ticker', '').upper())
+        if not cik:
+            continue
+        sh = r.get('Shares')
+        if not sh:
+            continue
+        out[(cik, r['PxDt'])] = int(sh)
+    return out
+
+
+_LEGACY_SHARES = _load_legacy_shares()
 
 
 def _parse_golden_date(s: str) -> date | None:
@@ -262,8 +287,20 @@ def _row_from_unreg(deal, golden) -> dict | None:
     if pdt is None or px <= 0:
         return None
 
-    # Size: prefer Form 4 sum; fall back to 144
+    # Size: prefer SEC-extracted (Form 4 sum then 144);
+    # fall back to legacy bootstrap by (CIK, PriceDt).
     shares = deal.block_shares if deal else 0
+    if shares == 0:
+        cik = (
+            deal.cik if deal
+            else (resolve_cik(golden['Ticker']) or '')
+        )
+        if cik:
+            legacy_sh = _LEGACY_SHARES.get(
+                (cik, golden['PriceDt'])
+            )
+            if legacy_sh:
+                shares = legacy_sh
     notional = shares * px if shares else 0.0
 
     # Seller: top entity by aggregated size; join the
