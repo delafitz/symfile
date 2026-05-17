@@ -43,10 +43,7 @@ from app.trades.hist import (
     build_reg_trade,
 )
 from app.trades.table import upsert_trades
-from app.edgar.parse.reg import (
-    BANK_SYMS,
-    REG_FORMS,
-)
+from app.parsers.reg import BANK_SYMS, REG_FORMS
 from app.mds.syms import (
     load_cusips,
     load_syms,

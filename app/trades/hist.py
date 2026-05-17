@@ -31,11 +31,8 @@ from app.edgar.parse.form144 import (
     Filing144,
     parse_144,
 )
-from app.edgar.parse.reg import (
-    BANK_SYMS,
-    REG_FORMS,
-    parse_reg,
-)
+from app.parsers.reg import BANK_SYMS, REG_FORMS
+from app.parsers.reg_deal import PARSERS
 from app.mds.massive.refs import RefRow
 from app.trades.banks import OTHER, parse_banks
 from app.util.log import log
@@ -231,8 +228,11 @@ def build_reg_trade(
     cik_map: dict[str, RefRow],
 ) -> Trade | None:
     """Parse a reg offering and build a Trade."""
-    d = parse_reg(raw)
-    if not d or d.shares <= 0:
+    parser = PARSERS.get(filing.form_type)
+    if parser is None:
+        return None
+    d = parser(raw)
+    if not d or d.shares_offered <= 0:
         return None
     ref = cik_map.get(filing.cik)
     if not ref:
@@ -250,28 +250,25 @@ def build_reg_trade(
     implied = (
         d.total
         if d.total
-        else d.shares * px
+        else d.shares_offered * px
     )
     if implied < MIN_REG_VALUE:
         return None
     if implied > ref.mkt_cap * MAX_MCAP_PCT:
         return None
+    is_seller = d.has_selling_stockholder
     return Trade(
         symbol=ref.symbol,
         date_filed=filing.date_filed,
-        shares=d.shares,
+        shares=d.shares_offered,
         implied_value=implied,
         price=px,
         price_source=px_src,
         filing_type=filing.form_type,
-        seller=(
-            'SEC'
-            if d.is_seller
-            else 'PRI'
-        ),
+        seller='SEC' if is_seller else 'PRI',
         relationship=(
             'selling stockholder'
-            if d.is_seller
+            if is_seller
             else 'company'
         ),
         underwriter=d.underwriter,

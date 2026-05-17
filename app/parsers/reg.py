@@ -1,8 +1,8 @@
 """Shared dataclass + cover-page utilities for 424B*
 filings.
 
-Per-form extractors live in reg_424b5.py / reg_424b7.py
-and populate a RegFiling.
+Per-form extractors live in reg_424bX.py modules and
+populate a RegFiling via parse_supplement.
 """
 
 from __future__ import annotations
@@ -10,6 +10,51 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass, field
+
+# Form types we handle. 424B5/B7 are by far the most
+# common for equity blocks; B2/B3/B4 cover utility
+# forward-sales, post-effective resales, and IPO
+# finals respectively.
+REG_FORMS = ('424B2', '424B3', '424B4', '424B5', '424B7')
+
+# CIKs/symbols of investment banks that file 424B2 to
+# document structured products on a near-daily basis.
+# Used by sync.py to drop their 424B2 noise before
+# even attempting to parse.
+BANK_SYMS = frozenset([
+    'RY', 'BNS', 'TD', 'CM', 'BMO',
+    'GS', 'MS', 'JPM', 'BAC', 'C',
+    'WFC', 'USB', 'PNC', 'TFC', 'SCHW',
+    'HSBC', 'BCS', 'DB', 'NMR', 'UBS',
+    'CS', 'MUFG',
+])
+
+# Known underwriter/bookrunner names — looked up in
+# the cluster before "The date of this prospectus
+# supplement is" header when no labelled bookrunner
+# section is present.
+KNOWN_BANKS = [
+    'J.P. Morgan', 'JPMorgan',
+    'Goldman Sachs & Co. LLC',
+    'Goldman Sachs & Co.',
+    'Morgan Stanley', 'BofA Securities',
+    'Barclays', 'Citigroup',
+    'Deutsche Bank', 'Jefferies',
+    'RBC Capital Markets',
+    'Wells Fargo Securities',
+    'Piper Sandler', 'Raymond James',
+    'Stephens Inc.', 'Oppenheimer & Co.',
+    'UBS', 'TD Securities', 'BTIG',
+    'Evercore ISI',
+    'Cantor Fitzgerald', 'Cantor',
+    'TD Cowen', 'Truist Securities',
+    'KeyBanc', 'William Blair',
+    'Needham', 'Canaccord Genuity',
+    'Leerink Partners',
+    'Guggenheim Securities',
+    'Nomura', 'Mizuho', 'Stifel',
+    'BMO Capital', 'Baird', 'Moelis',
+]
 
 # --- Dataclass ---
 
@@ -345,6 +390,63 @@ def is_ipo(clean: str) -> bool:
     return 'initial public offering' in clean[:15000].lower()
 
 
+_UNDERWRITER_LABEL_RE = [
+    re.compile(
+        r'(?:Joint\s+)?(?:Lead\s+)?'
+        r'Book[\s-]*Running\s+Managers?\s+(.*?)'
+        r'(?:The date|Co-Manager)',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'(?:Joint\s+)?(?:Lead\s+)?Bookrunners?\s+(.*?)'
+        r'(?:The date|Co-Manager)',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'Sole\s+Book[\s-]*Running\s+Manager\s+(.*?)'
+        r'(?:The date|Co-Manager)',
+        re.IGNORECASE,
+    ),
+]
+
+
+def find_underwriters(clean: str) -> str:
+    """Extract bookrunner names from the cover.
+
+    Two strategies: labelled "Book-Running Managers"
+    section first; otherwise look for known bank names
+    clustered near "The date of this prospectus..."
+    """
+    for pat in _UNDERWRITER_LABEL_RE:
+        m = pat.search(clean[:15000])
+        if m:
+            raw = re.sub(r'\s+', ' ', m.group(1).strip())
+            for stop in (
+                'Table of Contents',
+                'Prospectus supplement',
+                'Page ',
+            ):
+                si = raw.find(stop)
+                if si > 0:
+                    raw = raw[:si].strip()
+            return raw[:200]
+
+    di = clean.lower().find(
+        'the date of this prospectus supplement is'
+    )
+    if di > 0:
+        chunk = clean[max(0, di - 400) : di]
+        found = [
+            (b, chunk.index(b))
+            for b in KNOWN_BANKS
+            if b in chunk
+        ]
+        if found:
+            found.sort(key=lambda x: x[1])
+            return ', '.join(b for b, _ in found)
+    return ''
+
+
 # --- Shared dispatcher ---
 
 
@@ -413,5 +515,6 @@ def parse_supplement(
     f.is_preliminary = is_preliminary(clean)
     f.is_ipo = is_ipo(clean)
     f.is_bought = is_bought_deal(clean)
+    f.underwriter = find_underwriters(clean)
 
     return f
