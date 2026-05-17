@@ -90,31 +90,43 @@ def decode_raw(raw: bytes) -> str:
 #      "Per Share $ 16.85 $ 0.42 $ 16.43"
 # All allow 2 or 3 decimal places.
 _OFFER_PX_RE = re.compile(
-    r'[Pp]ublic offering price[\s\S]{0,200}?'
-    r'\$\s*([\d]+\.[\d]{2,3})'
+    r'public offering price[\s\S]{0,200}?'
+    r'\$\s*([\d]+\.[\d]{2,5})',
+    re.IGNORECASE,
 )
 _BLOCK_PX_RE = re.compile(
     r'(?:agreed|committed)\s+to\s+purchase[\s\S]{0,400}?'
-    r'at\s+(?:a\s+)?price\s+(?:of\s+|equal\s+to\s+)?'
-    r'\$\s*([\d]+\.[\d]{2,3})',
+    r'at\s+(?:a\s+|the\s+)?price\s+'
+    r'(?:of\s+|equal\s+to\s+)?'
+    r'\$\s*([\d]+\.[\d]{2,5})',
     re.IGNORECASE,
 )
 _PER_SHARE_TABLE_RE = re.compile(
     r'Per\s+Share\b[\s\S]{0,60}?'
-    r'\$\s*([\d]+\.[\d]{2,3})'
+    r'\$\s*([\d]+\.[\d]{2,5})'
 )
 
 # Total dollar amount — either the second $ on a
 # pricing-table row, or the "Total" row of the
 # 3-column pricing table.
 _TOTAL_RE = re.compile(
-    r'[Pp]ublic offering price[\s\S]{0,200}?'
-    r'\$\s*[\d]+\.[\d]{2,3}[\s\S]{0,80}?'
-    r'\$\s*([\d,]+(?:\.[\d]{2})?)'
+    r'public offering price[\s\S]{0,200}?'
+    r'\$\s*[\d]+\.[\d]{2,5}[\s\S]{0,80}?'
+    r'\$\s*([\d,]+(?:\.[\d]{2})?)',
+    re.IGNORECASE,
 )
 _TOTAL_TABLE_RE = re.compile(
     r'\bTotal\b[\s\S]{0,60}?'
     r'\$\s*([\d,]{7,})(?:\.[\d]{2})?'
+)
+# Block-deal proceeds: "...which will result in $X of
+# proceeds" / "...for aggregate proceeds of $X".
+# Some filings have a stray duplicate $ (typos like
+# "result in $ $344,374,110") so allow optional extra.
+_BLOCK_TOTAL_RE = re.compile(
+    r'(?:will\s+result\s+in|aggregate\s+proceeds\s+of)'
+    r'\s+\$\s*\$?\s*([\d,]{7,})(?:\.[\d]{2})?',
+    re.IGNORECASE,
 )
 
 # "last reported sale price ... was $X.XX" — $ is
@@ -203,17 +215,18 @@ def find_offer_price(clean: str) -> float:
 
 
 def find_total(clean: str) -> float:
-    """Gross proceeds from the pricing table.
+    """Gross proceeds.
 
-    Tries the same-row pattern first; falls back to
-    the "Total" row of a 3-column pricing table.
+    Tries the public-offering-price row, then the
+    "Total" row of a 3-column table, then block-deal
+    "will result in $X" / "aggregate proceeds of $X"
+    phrasing.
     """
-    for pat in (_TOTAL_RE, _TOTAL_TABLE_RE):
+    for pat in (_TOTAL_RE, _TOTAL_TABLE_RE, _BLOCK_TOTAL_RE):
         m = pat.search(clean[:15000])
         if not m:
             continue
         val = float(m.group(1).replace(',', ''))
-        # Sanity: cover totals are at least $1M
         if val > 1_000_000:
             return val
     return 0.0
