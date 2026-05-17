@@ -96,24 +96,24 @@ def _load_block_offer_px() -> dict[tuple[str, str], float]:
 _BLOCK_OVERRIDES = _load_block_offer_px()
 
 
-def _load_legacy_shares() -> dict[tuple[str, str], int]:
-    """(cik_unpadded, PxDt) -> Shares from legacy json."""
+def _load_legacy_lookup() -> dict[tuple[str, str], dict]:
+    """(cik_unpadded, PxDt) -> {Shares, LeftBank} from legacy."""
     if not LEGACY_BLOCKS.exists():
         return {}
     legacy = json.loads(LEGACY_BLOCKS.read_text())
-    out: dict[tuple[str, str], int] = {}
+    out: dict[tuple[str, str], dict] = {}
     for r in legacy:
         cik = resolve_cik(r.get('Ticker', '').upper())
         if not cik:
             continue
-        sh = r.get('Shares')
-        if not sh:
-            continue
-        out[(cik, r['PxDt'])] = int(sh)
+        out[(cik, r['PxDt'])] = {
+            'shares': r.get('Shares'),
+            'left_bank': r.get('LeftBank'),
+        }
     return out
 
 
-_LEGACY_SHARES = _load_legacy_shares()
+_LEGACY_LOOKUP = _load_legacy_lookup()
 
 
 def _load_manual_shares() -> dict[tuple[str, str], int]:
@@ -319,23 +319,23 @@ def _row_from_unreg(deal, golden) -> dict | None:
     if pdt is None or px <= 0:
         return None
 
+    cik = (
+        deal.cik if deal
+        else (resolve_cik(golden['Ticker']) or '')
+    )
+    legacy_match = (
+        _LEGACY_LOOKUP.get((cik, golden['PriceDt']))
+        if cik else None
+    )
+
     # Size resolution order:
     #   1. Form 4 sum (block_shares from resolver)
     #   2. 144 sum (block_shares falls back to it)
     #   3. legacy bootstrap by (CIK, PriceDt)
     #   4. manual override by (Ticker, PriceDt)
     shares = deal.block_shares if deal else 0
-    if shares == 0:
-        cik = (
-            deal.cik if deal
-            else (resolve_cik(golden['Ticker']) or '')
-        )
-        if cik:
-            legacy_sh = _LEGACY_SHARES.get(
-                (cik, golden['PriceDt'])
-            )
-            if legacy_sh:
-                shares = legacy_sh
+    if shares == 0 and legacy_match and legacy_match['shares']:
+        shares = int(legacy_match['shares'])
     if shares == 0:
         manual_sh = _MANUAL_SHARES.get(
             (golden['Ticker'], golden['PriceDt'])
@@ -343,6 +343,14 @@ def _row_from_unreg(deal, golden) -> dict | None:
         if manual_sh:
             shares = manual_sh
     notional = shares * px if shares else 0.0
+
+    # Banks: pull from legacy when present. Unreg
+    # filings (144 / Form 4) don't disclose the
+    # underwriter, so this is the only source.
+    banks: list[str] = []
+    if legacy_match and legacy_match['left_bank']:
+        lb = legacy_match['left_bank'].strip()
+        banks = [_LEGACY_BANK_MAP.get(lb, lb)]
 
     # Seller: top entity by aggregated size; join the
     # next few with semicolons for cluster sellers.
@@ -373,9 +381,8 @@ def _row_from_unreg(deal, golden) -> dict | None:
         ),
         'seller': seller_name,
         'relationship': relationship,
-        'banks': [],
-        'cik': (deal.cik if deal else '')
-        or (resolve_cik(golden['Ticker']) or ''),
+        'banks': banks,
+        'cik': cik,
         'evidence': deal.evidence if deal else 'golden',
         'source': UNREG_GOLDEN.name,
     }
