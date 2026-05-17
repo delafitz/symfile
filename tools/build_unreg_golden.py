@@ -1,21 +1,24 @@
 """Flatten data/bootstrap/unreg.csv into a JSON
 golden list for unregistered block trades.
 
-The CSV is three side-by-side (date, symbol, intraday)
-triples — one per year column (2026 / 2025 / 2024).
-Each row of a triple is one block. Intraday='y' means
-the announcement was during market hours and the trade
-priced/executed the same day; blank means announced
-after-close, executed the next weekday.
+The CSV has four side-by-side columns per year
+(2026 / 2025 / 2024):
+  date, symbol, intraday-flag, offer-price.
+
+Intraday='y' means the announcement was during market
+hours and the trade priced/executed the same day;
+blank means announced after-close, executed next
+weekday. OfferPx is the block clear price.
 
 Output: data/bootstrap/unreg_golden.YYYYMMDD.json
   [
     {
-      "Ticker": "...",
+      "Ticker": "KNTK",
       "Type": "Unreg",
       "PriceDt": "30-Apr-2026",
       "TradeDt": "1-May-2026",
-      "Intraday": false
+      "Intraday": false,
+      "OfferPx": 49.8
     },
     ...
   ]
@@ -66,18 +69,21 @@ def main() -> None:
     out = []
     for line in rows[1:]:
         for year, base in triples:
-            md = line[base] if base < len(line) else ''
-            sym = line[base + 1] if base + 1 < len(line) else ''
-            intra = (
-                line[base + 2].strip().lower() == 'y'
-                if base + 2 < len(line) else False
-            )
-            sym = sym.strip()
+            def cell(off: int) -> str:
+                i = base + off
+                return line[i].strip() if i < len(line) else ''
+            sym = cell(1)
             if not sym:
                 continue
-            d = _parse_md(md, year)
+            d = _parse_md(cell(0), year)
             if d is None:
                 continue
+            intra = cell(2).lower() == 'y'
+            px_raw = cell(3)
+            try:
+                offer_px = float(px_raw) if px_raw else 0.0
+            except ValueError:
+                offer_px = 0.0
             trade = d if intra else _next_weekday(d)
             out.append({
                 'Ticker': sym,
@@ -85,6 +91,7 @@ def main() -> None:
                 'PriceDt': d.strftime('%-d-%b-%Y'),
                 'TradeDt': trade.strftime('%-d-%b-%Y'),
                 'Intraday': intra,
+                'OfferPx': offer_px,
             })
 
     out.sort(key=lambda r: (r['Ticker'], r['PriceDt']))
@@ -95,7 +102,9 @@ def main() -> None:
     print(f'{len(out)} rows -> {out_path}')
 
     n_intra = sum(1 for r in out if r['Intraday'])
+    n_px = sum(1 for r in out if r['OfferPx'] > 0)
     print(f'  intraday: {n_intra}  next-day: {len(out) - n_intra}')
+    print(f'  with OfferPx: {n_px}/{len(out)}')
 
 
 if __name__ == '__main__':
