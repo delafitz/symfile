@@ -404,16 +404,15 @@ def sync(
         )
     )
 
+    # Trade emission is being rewritten for the new
+    # deal-level (price_date, symbol, offer_price)
+    # schema. The legacy per-filing Trade dataclass
+    # is no longer compatible with trades.parquet —
+    # disable until the new flagger lands.
     if pending_trades:
-        upsert_trades(pending_trades)
-
-    # Promote any newly-qualifying Form 4 sales into
-    # trades.parquet (size-relative block heuristic)
-    from app.trades.form4_block import (
-        build_form4_trades,
-    )
-    f4_trades = build_form4_trades(syms)
-    if f4_trades:
-        upsert_trades(f4_trades)
+        log.info(
+            'sync: deferring trade upsert',
+            count=len(pending_trades),
+        )
 
     return new

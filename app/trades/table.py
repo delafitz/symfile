@@ -1,51 +1,50 @@
-"""Persisted trades table.
+"""Persisted trades table — deal-level candidates.
 
-Stores block-trade records (144 + registered offerings)
-as a parquet file. Keyed on (symbol, date_filed,
-filing_type, seller, shares) — latest filing wins.
+One row per detected/seeded block. Sync loosely flags
+new candidates into here; the review/confirmed
+workflow promotes confirmed rows into the blocks
+table (same schema + status).
 
-Usage:
-    upsert_trades(trades)  — merge new Trade records
-    load_trades()          — read table as DataFrame
+Primary key (unique): (price_date, symbol, offer_price)
+
+  upsert_trades(rows: list[dict]) — merge
+  load_trades()                   — read as DataFrame
 """
 
-from dataclasses import asdict
 from pathlib import Path
 
 import polars as pl
 
 from app.mds import DATA_DIR as MDS_DIR
-from app.trades.hist import Trade
 from app.util.log import log
 
 TABLE_DIR = Path(MDS_DIR).parent / 'trades'
 TABLE_PATH = TABLE_DIR / 'trades.parquet'
 
 SCHEMA = {
-    'symbol': pl.Utf8,
-    'date_filed': pl.Utf8,
-    'shares': pl.Int64,
-    'implied_value': pl.Float64,
-    'price': pl.Float64,
-    'price_source': pl.Utf8,
-    'filing_type': pl.Utf8,
-    'seller': pl.Utf8,
+    # ---- Composite key (unique) ----
+    'price_date':   pl.Date,
+    'symbol':       pl.Utf8,
+    'offer_price':  pl.Float64,
+    # ---- Classification ----
+    'type':         pl.Utf8,        # 'Reg' | 'Unreg'
+    # ---- Trade details ----
+    'trade_date':   pl.Date,
+    'intraday':     pl.Boolean,
+    'shares':       pl.Int64,
+    'notional':     pl.Float64,     # shares * offer_price
+    # ---- Seller ----
+    'seller':       pl.Utf8,
     'relationship': pl.Utf8,
-    'underwriter': pl.Utf8,
-    'mkt_cap': pl.Float64,
-    'flagged_block': pl.Boolean,
-    'is_ipo': pl.Boolean,
-    'trade_date': pl.Utf8,
-    'nature': pl.Utf8,
-    'pct_outstanding': pl.Float64,
-    'lockup': pl.Boolean,
-    'lockup_days': pl.Int64,
+    # ---- Banking ----
+    'banks':        pl.List(pl.Utf8),
+    # ---- Provenance ----
+    'cik':          pl.Utf8,
+    'evidence':     pl.Utf8,        # 'golden' | 'form4' | 'reg' | ...
+    'source':       pl.Utf8,        # source ref (golden filename etc.)
 }
 
-KEY_COLS = [
-    'symbol', 'date_filed', 'filing_type',
-    'seller', 'shares',
-]
+KEY_COLS = ['price_date', 'symbol', 'offer_price']
 
 
 def _empty() -> pl.DataFrame:
@@ -56,7 +55,6 @@ def load_trades() -> pl.DataFrame:
     if not TABLE_PATH.exists():
         return _empty()
     df = pl.read_parquet(TABLE_PATH)
-    # Add columns missing from older files
     for col, dtype in SCHEMA.items():
         if col not in df.columns:
             df = df.with_columns(
@@ -70,33 +68,26 @@ def _save(df: pl.DataFrame) -> None:
     df.write_parquet(TABLE_PATH)
 
 
-def upsert_trades(trades: list[Trade]) -> int:
-    """Merge new Trade records into the table.
-
-    Returns count of net-new rows added.
-    """
-    if not trades:
+def upsert_trades(rows: list[dict]) -> int:
+    """Merge new rows. Key collisions overwrite the
+    existing row. Returns count of net-new rows."""
+    if not rows:
         return 0
 
-    new_df = pl.DataFrame(
-        [asdict(t) for t in trades],
-        schema=SCHEMA,
-    )
+    new_df = pl.DataFrame(rows, schema=SCHEMA)
+    # Dedupe within the batch on the key.
+    new_df = new_df.unique(subset=KEY_COLS, keep='last')
 
     existing = load_trades()
-
-    keys = new_df.select(KEY_COLS).unique()
-    kept = existing.join(
-        keys, on=KEY_COLS, how='anti',
-    )
-
+    keys = new_df.select(KEY_COLS)
+    kept = existing.join(keys, on=KEY_COLS, how='anti')
     merged = pl.concat([kept, new_df])
     _save(merged)
 
     added = merged.height - existing.height
     log.info(
         'upsert trades',
-        new=len(trades),
+        new=len(rows),
         added=added,
         total=merged.height,
     )

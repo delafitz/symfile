@@ -1,0 +1,299 @@
+"""Seed trades + blocks tables from confirmed goldens.
+
+Both tables get the same rows. trades is the loose
+flagging layer; blocks is the confirmed truth (here
+status='confirmed' because goldens are pre-vetted).
+
+  reg goldens   -> RegDeal eval -> offer_price from
+                   parser, shares + banks from parsed
+                   cluster, type='Reg'
+  unreg goldens -> OfferPx from golden, shares from
+                   UnregDeal eval, type='Unreg'
+
+    uv run python tools/seed_goldens.py [--reg] [--unreg]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+import polars as pl
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.edgar.fetch import get_cached  # noqa: E402
+from app.edgar.parse.form144 import parse_144  # noqa: E402
+from app.edgar.parse.form4 import parse_form4  # noqa: E402
+from app.mds.syms import resolve_cik  # noqa: E402
+from app.parsers.reg_deal import (  # noqa: E402
+    parse_member,
+    resolve_deal,
+)
+from app.parsers.unreg import resolve_unreg_deal  # noqa: E402
+from app.trades.banks import parse_banks  # noqa: E402
+from app.trades.blocks import upsert_blocks  # noqa: E402
+from app.trades.table import upsert_trades  # noqa: E402
+from app.util.log import log  # noqa: E402
+
+REG_GOLDEN = Path('data/bootstrap/regs_golden.20260516.json')
+UNREG_GOLDEN = Path('data/bootstrap/unreg_golden.20260517.json')
+REG_LABELS = Path('data/corpus/reg_labels.parquet')
+REG_CORPUS = Path('data/corpus/reg_corpus.parquet')
+INDEX_DIR = Path('data/indices')
+
+
+def _parse_golden_date(s: str) -> date | None:
+    try:
+        return datetime.strptime(s, '%d-%b-%Y').date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_iso(s: str) -> date | None:
+    try:
+        return date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+    except (ValueError, IndexError, TypeError):
+        return None
+
+
+# ----- Reg seeding -----
+
+
+def _row_from_reg_deal(deal, golden) -> dict | None:
+    if (
+        deal is None
+        or not deal.offer_price
+        or not deal.shares_offered
+    ):
+        return None
+    pdt = _parse_golden_date(golden['PriceDt'])
+    if pdt is None:
+        return None
+
+    notional = deal.shares_offered * deal.offer_price
+    banks = (
+        parse_banks(deal.underwriter)
+        if deal.underwriter else []
+    )
+    if isinstance(banks, tuple):
+        banks = list(banks)
+    seller_rel = (
+        'selling stockholder'
+        if deal.has_selling_stockholder
+        else 'company'
+    )
+    return {
+        'price_date': pdt,
+        'symbol': deal.symbol or golden['Ticker'],
+        'offer_price': float(deal.offer_price),
+        'type': 'Reg',
+        'trade_date': pdt,
+        'intraday': False,
+        'shares': int(deal.shares_offered),
+        'notional': float(notional),
+        'seller': deal.issuer_name or '',
+        'relationship': seller_rel,
+        'banks': banks,
+        'cik': deal.cik,
+        'evidence': 'golden+parser',
+        'source': REG_GOLDEN.name,
+    }
+
+
+def seed_reg() -> list[dict]:
+    """Re-build the labeled corpus clusters and produce
+    one row per resolved RegDeal."""
+    labels = pl.read_parquet(REG_LABELS)
+    corpus = pl.read_parquet(REG_CORPUS)
+    cik_for = {
+        r['filename']: r['cik']
+        for r in corpus.to_dicts()
+    }
+    golden = json.loads(REG_GOLDEN.read_text())
+
+    by_idx = defaultdict(list)
+    for r in labels.to_dicts():
+        by_idx[r['golden_idx']].append(r)
+
+    out = []
+    for gi, rows in by_idx.items():
+        g = golden[gi]
+        symbol = (g.get('Ticker') or '').upper()
+        members = []
+        for r in rows:
+            raw = get_cached(r['candidate_filename'])
+            if raw is None:
+                continue
+            members.append(parse_member(
+                filename=r['candidate_filename'],
+                filing_date=datetime.fromisoformat(
+                    r['candidate_date']
+                ).date(),
+                form_type=r['form_type'],
+                cik=cik_for.get(
+                    r['candidate_filename'], ''
+                ),
+                raw=raw,
+            ))
+        deal = resolve_deal(members, symbol)
+        row = _row_from_reg_deal(deal, g)
+        if row:
+            out.append(row)
+    return out
+
+
+# ----- Unreg seeding -----
+
+
+def _scan_unreg_candidates(
+    cik: str, lo: date, hi: date,
+) -> list[tuple[date, str, str]]:
+    out: list[tuple[date, str, str]] = []
+    seen: set[str] = set()
+    for f in sorted(
+        list(INDEX_DIR.glob('full.*.idx'))
+        + list(INDEX_DIR.glob('daily.*.idx'))
+    ):
+        for line in f.read_text().splitlines():
+            parts = line.split('|')
+            if len(parts) < 5:
+                continue
+            form = parts[2]
+            if not (
+                form.startswith('144')
+                or form in ('4', '4/A')
+            ):
+                continue
+            c = parts[0].lstrip('0') or '0'
+            if c != cik:
+                continue
+            d = _parse_iso(parts[3])
+            if d is None or d < lo or d > hi:
+                continue
+            fn = parts[4]
+            if fn in seen:
+                continue
+            seen.add(fn)
+            out.append((d, form, fn))
+    return out
+
+
+def _row_from_unreg(deal, golden) -> dict | None:
+    pdt = _parse_golden_date(golden['PriceDt'])
+    tdt = _parse_golden_date(golden['TradeDt'])
+    px = float(golden.get('OfferPx') or 0.0)
+    if pdt is None or px <= 0:
+        return None
+
+    # Size: prefer Form 4 sum; fall back to 144
+    shares = deal.block_shares if deal else 0
+    notional = shares * px if shares else 0.0
+
+    # Seller / relationship — pull a best-guess name
+    seller_name = ''
+    relationship = ''
+    return {
+        'price_date': pdt,
+        'symbol': golden['Ticker'],
+        'offer_price': px,
+        'type': 'Unreg',
+        'trade_date': tdt or pdt,
+        'intraday': bool(golden.get('Intraday')),
+        'shares': int(shares),
+        'notional': float(notional),
+        'seller': seller_name,
+        'relationship': relationship,
+        'banks': [],
+        'cik': (deal.cik if deal else '')
+        or (resolve_cik(golden['Ticker']) or ''),
+        'evidence': deal.evidence if deal else 'golden',
+        'source': UNREG_GOLDEN.name,
+    }
+
+
+def seed_unreg() -> list[dict]:
+    golden = json.loads(UNREG_GOLDEN.read_text())
+    out = []
+    for g in golden:
+        sym = g['Ticker']
+        cik = resolve_cik(sym)
+        pdt = _parse_golden_date(g['PriceDt'])
+        tdt = _parse_golden_date(g['TradeDt'])
+        if cik is None or pdt is None:
+            # Still seed (golden is truth) with no
+            # filing-derived size — shares=0 is fine.
+            out.append(_row_from_unreg(None, g))
+            continue
+        lo = pdt - timedelta(days=2)
+        hi = (tdt or pdt) + timedelta(days=5)
+        cands = _scan_unreg_candidates(cik, lo, hi)
+
+        f4s, f144s = [], []
+        for _, form, fn in cands:
+            raw = get_cached(fn)
+            if raw is None:
+                continue
+            if form in ('4', '4/A'):
+                f4s.extend(parse_form4(raw))
+            elif form.startswith('144'):
+                p = parse_144(raw)
+                if p:
+                    f144s.append(p)
+        deal = resolve_unreg_deal(
+            cik=cik, symbol=sym,
+            price_date=pdt, trade_date=tdt,
+            intraday=bool(g.get('Intraday')),
+            form4_txns=f4s, f144_filings=f144s,
+        )
+        row = _row_from_unreg(deal, g)
+        if row:
+            out.append(row)
+    return [r for r in out if r is not None]
+
+
+# ----- Driver -----
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--reg', action='store_true')
+    ap.add_argument('--unreg', action='store_true')
+    args = ap.parse_args()
+
+    do_reg = args.reg or not (args.reg or args.unreg)
+    do_unreg = args.unreg or not (args.reg or args.unreg)
+
+    rows: list[dict] = []
+    if do_reg:
+        print('seeding reg...')
+        r = seed_reg()
+        print(f'  {len(r)} reg rows')
+        rows.extend(r)
+
+    if do_unreg:
+        print('seeding unreg...')
+        u = seed_unreg()
+        print(f'  {len(u)} unreg rows')
+        rows.extend(u)
+
+    if not rows:
+        return
+
+    upsert_trades(rows)
+
+    # Promote to blocks with status='confirmed'
+    now = datetime.now().isoformat(timespec='seconds')
+    blocks_rows = [
+        {**r, 'status': 'confirmed', 'reviewed_at': now}
+        for r in rows
+    ]
+    upsert_blocks(blocks_rows)
+
+
+if __name__ == '__main__':
+    main()

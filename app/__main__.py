@@ -143,10 +143,15 @@ def scan(
         ),
     ] = False,
 ) -> None:
-    """Scan for block trades (144 + reg)."""
+    """Scan for block trades (144 + reg).
+
+    Trade emission is being rewritten for the deal-level
+    (price_date, symbol, offer_price) schema. The legacy
+    Trade dataclass is no longer persisted — this command
+    only prints the candidate list it would have emitted.
+    """
     from app.mds.syms import load_syms
     from app.trades.hist import get_trades
-    from app.trades.table import upsert_trades
 
     syms = load_syms()
 
@@ -172,11 +177,9 @@ def scan(
         symbol=symbol.upper() if symbol else None,
         types=types,
     )
-
-    added = upsert_trades(trades)
     trades.sort(key=lambda t: -t.implied_value)
 
-    print(f'\n{len(trades)} trades ({added} new)')
+    print(f'\n{len(trades)} candidates (not persisted)')
     print(
         f'\n{"SYM":<6s} {"DATE":<12s} '
         f'{"TYPE":<8s} {"SHARES":>12s} '
@@ -311,25 +314,29 @@ def reprocess_form4(
 
 @app.command()
 def flag_form4() -> None:
-    """Promote large Form 4 sales into trades.parquet."""
-    from app.mds.syms import load_syms
-    from app.trades.form4_block import (
-        build_form4_trades,
-    )
-    from app.trades.table import upsert_trades
+    """Deprecated: legacy Form 4 -> trades emitter.
 
-    syms = load_syms()
-    trades = build_form4_trades(syms)
-    added = upsert_trades(trades)
-    print(f'{len(trades)} candidates, {added} new')
+    Schema cutover in progress — use seed-goldens for
+    now; sync-time flagging will be rewritten next.
+    """
+    print(
+        'flag_form4 disabled during schema cutover. '
+        'See tools/seed_goldens.py'
+    )
 
 
 @app.command()
 def review() -> None:
-    """Review flagged trades and confirm blocks."""
-    from app.trades.review import review_trades
+    """Deprecated: interactive review CLI.
 
-    review_trades()
+    Used the old per-filing key. Will be rewritten
+    against the new (price_date, symbol, offer_price)
+    schema after the seed lands.
+    """
+    print(
+        'review disabled during schema cutover. '
+        'Blocks are seeded from confirmed goldens.'
+    )
 
 
 @app.command()

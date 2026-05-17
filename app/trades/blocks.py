@@ -1,50 +1,28 @@
 """Confirmed blocks table.
 
-Stores human-reviewed block trades with optional
-override fields. Keyed on the same composite key as
-the raw trades table for trivial joins.
+Same schema as the trades table plus a status/audit
+pair. A row in `blocks` represents a confirmed block
+(seeded from golden or human-reviewed). The shared
+primary key lets `blocks` join `trades` trivially.
 
-The interactive review/modification workflow lives
-in app.trades.review.
-
-    load_blocks()    — read raw table as DataFrame
-    upsert_blocks()  — merge confirmed/rejected rows
-    load_confirmed() — confirmed blocks joined with
-                       raw trades (for API)
+Primary key (unique): (price_date, symbol, offer_price)
 """
+
+from pathlib import Path
 
 import polars as pl
 
-from app.trades.table import (
-    KEY_COLS,
-    TABLE_DIR,
-    load_trades,
-)
+from app.trades.table import KEY_COLS, SCHEMA as TRADES_SCHEMA
+from app.trades.table import TABLE_DIR
 from app.util.log import log
 
 TABLE_PATH = TABLE_DIR / 'blocks.parquet'
 
 SCHEMA = {
-    # Link key (same as trades table)
-    'symbol': pl.Utf8,
-    'date_filed': pl.Utf8,
-    'filing_type': pl.Utf8,
-    'seller': pl.Utf8,
-    'shares': pl.Int64,
-    # Override fields (null = use raw value)
-    'notional': pl.Float64,
-    'tx_price': pl.Float64,
-    'offer_price': pl.Float64,
-    'pricing_date': pl.Utf8,
-    'trade_date': pl.Utf8,
-    'seller_name': pl.Utf8,
-    'banks': pl.List(pl.Utf8),
-    # Block-specific fields
-    'is_primary': pl.Boolean,
-    # Metadata
-    'status': pl.Utf8,
-    'reviewed_at': pl.Utf8,
-    'source': pl.Utf8,
+    **TRADES_SCHEMA,
+    # Review metadata
+    'status':       pl.Utf8,    # 'confirmed' | 'rejected'
+    'reviewed_at':  pl.Utf8,
 }
 
 
@@ -70,21 +48,17 @@ def _save(df: pl.DataFrame) -> None:
 
 
 def upsert_blocks(rows: list[dict]) -> int:
-    """Merge confirmed/rejected block rows.
-
-    Returns count of net-new rows added.
-    """
+    """Merge confirmed/rejected block rows. Returns
+    count of net-new rows added."""
     if not rows:
         return 0
 
     new_df = pl.DataFrame(rows, schema=SCHEMA)
+    new_df = new_df.unique(subset=KEY_COLS, keep='last')
+
     existing = load_blocks()
-
-    keys = new_df.select(KEY_COLS).unique()
-    kept = existing.join(
-        keys, on=KEY_COLS, how='anti',
-    )
-
+    keys = new_df.select(KEY_COLS)
+    kept = existing.join(keys, on=KEY_COLS, how='anti')
     merged = pl.concat([kept, new_df])
     _save(merged)
 
@@ -99,53 +73,7 @@ def upsert_blocks(rows: list[dict]) -> int:
 
 
 def load_confirmed() -> pl.DataFrame:
-    """Load confirmed blocks joined with raw trades.
-
-    Override fields from blocks take precedence;
-    falls back to raw trade values.
-    """
-    blocks = load_blocks().filter(
+    """Confirmed blocks only (status='confirmed')."""
+    return load_blocks().filter(
         pl.col('status') == 'confirmed'
-    )
-    if blocks.height == 0:
-        return blocks
-
-    trades = load_trades()
-
-    joined = blocks.join(
-        trades, on=KEY_COLS, how='left',
-    )
-
-    return joined.select(
-        'symbol',
-        'date_filed',
-        'filing_type',
-        pl.coalesce(
-            'seller_name', 'seller',
-        ).alias('seller'),
-        'shares',
-        pl.coalesce(
-            'notional', 'implied_value',
-        ).alias('notional'),
-        pl.col('tx_price'),
-        pl.coalesce(
-            'offer_price', 'price',
-        ).alias('offer_price'),
-        pl.coalesce(
-            'pricing_date', 'date_filed',
-        ).alias('pricing_date'),
-        pl.coalesce(
-            'trade_date', 'trade_date_right',
-        ).alias('trade_date'),
-        pl.col('price_source'),
-        pl.col('relationship'),
-        'banks',
-        pl.col('is_primary')
-        .fill_null(False)
-        .alias('is_primary'),
-        pl.col('is_ipo'),
-        pl.col('lockup'),
-        pl.col('lockup_days'),
-        'reviewed_at',
-        'source',
     )
