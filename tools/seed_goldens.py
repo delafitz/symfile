@@ -48,6 +48,19 @@ UNREG_GOLDEN = Path('data/bootstrap/unreg_golden.20260517.json')
 REG_LABELS = Path('data/corpus/reg_labels.parquet')
 REG_CORPUS = Path('data/corpus/reg_corpus.parquet')
 INDEX_DIR = Path('data/indices')
+# Direct-from-legacy seed for blocks with no SEC filing
+# (foreign issuers like GFL/TMUS/CIGI etc.)
+LEGACY_SEED = Path('data/bootstrap/legacy_seed.csv')
+
+# Legacy uses shorthand bank codes; map to our canonical
+# keys (compare_old_blocks.py shares this convention).
+_LEGACY_BANK_MAP = {
+    'BAML': 'BAC', 'Citi': 'C', 'Jefferies': 'JEF',
+    'BCS': 'BCS', 'GS': 'GS', 'JPM': 'JPM',
+    'MS': 'MS', 'RBC': 'RBC', 'WFC': 'WFC',
+    'BMO': 'BMO', 'UBS': 'UBS', 'Cantor': 'Cantor',
+    'CanGen': 'CF',  # Canaccord Genuity
+}
 # Manual gross-price overrides for bought-deal block
 # reg filings (the filing only states the net to seller;
 # the public reoffer price is outside the document).
@@ -330,6 +343,55 @@ def seed_unreg() -> list[dict]:
     return [r for r in out if r is not None]
 
 
+# ----- Legacy direct-seed (no SEC filings) -----
+
+
+def seed_legacy() -> list[dict]:
+    """Seed blocks straight from legacy json for deals
+    with no SEC filing (foreign issuers etc.). All fields
+    come from the legacy record — no parsing involved."""
+    import csv as _csv
+    if not LEGACY_SEED.exists():
+        return []
+    out = []
+    with LEGACY_SEED.open() as fh:
+        for r in _csv.DictReader(fh):
+            sym = r['Ticker']
+            pdt = _parse_golden_date(r['PxDt'])
+            tdt = _parse_golden_date(r['TradeDt']) or pdt
+            if pdt is None:
+                continue
+            try:
+                px = float(r['OfferPx'])
+                sh = int(r['Shares'])
+            except (ValueError, TypeError):
+                continue
+            cik = resolve_cik(sym) or ''
+            lb = (r.get('LeftBank') or '').strip()
+            banks = (
+                [_LEGACY_BANK_MAP.get(lb, lb)]
+                if lb else []
+            )
+            out.append({
+                'price_date': pdt,
+                'symbol': sym,
+                'offer_price': px,
+                'type': r.get('Type') or 'Unreg',
+                'trade_date': tdt,
+                'intraday': tdt == pdt,
+                'shares': sh,
+                'notional': sh * px,
+                **_split_cols(sym, pdt, sh, px),
+                'seller': '',
+                'relationship': '',
+                'banks': banks,
+                'cik': cik,
+                'evidence': 'legacy_bootstrap',
+                'source': 'block_trades.20260321.json',
+            })
+    return out
+
+
 # ----- Driver -----
 
 
@@ -337,10 +399,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--reg', action='store_true')
     ap.add_argument('--unreg', action='store_true')
+    ap.add_argument('--legacy', action='store_true')
     args = ap.parse_args()
 
-    do_reg = args.reg or not (args.reg or args.unreg)
-    do_unreg = args.unreg or not (args.reg or args.unreg)
+    any_flag = args.reg or args.unreg or args.legacy
+    do_reg = args.reg or not any_flag
+    do_unreg = args.unreg or not any_flag
+    do_legacy = args.legacy or not any_flag
 
     rows: list[dict] = []
     if do_reg:
@@ -354,6 +419,12 @@ def main() -> None:
         u = seed_unreg()
         print(f'  {len(u)} unreg rows')
         rows.extend(u)
+
+    if do_legacy:
+        print('seeding legacy (no-filing blocks)...')
+        L = seed_legacy()
+        print(f'  {len(L)} legacy rows')
+        rows.extend(L)
 
     if not rows:
         return
