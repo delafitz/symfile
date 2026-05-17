@@ -25,14 +25,21 @@ SCHEMA = {
     # ---- Composite key (unique) ----
     'price_date':   pl.Date,
     'symbol':       pl.Utf8,
-    'offer_price':  pl.Float64,
+    'offer_price':  pl.Float64,     # as-filed (historical)
     # ---- Classification ----
     'type':         pl.Utf8,        # 'Reg' | 'Unreg'
     # ---- Trade details ----
     'trade_date':   pl.Date,
     'intraday':     pl.Boolean,
-    'shares':       pl.Int64,
+    'shares':       pl.Int64,       # as-filed
     'notional':     pl.Float64,     # shares * offer_price
+    # ---- Split adjustment (today's basis) ----
+    # cumulative factor from price_date forward.
+    # split_factor > 1 -> forward split since;
+    # < 1 -> reverse split; = 1 -> no split.
+    'split_factor':         pl.Float64,
+    'shares_adjusted':      pl.Int64,   # shares * factor
+    'offer_price_adjusted': pl.Float64, # offer_price / factor
     # ---- Seller ----
     'seller':       pl.Utf8,
     'relationship': pl.Utf8,

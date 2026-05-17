@@ -118,6 +118,8 @@ def main() -> None:
           f'{len(ours_in_window - legacy_keys)}')
 
     # --- field-level agreement on matched rows ---
+    # Compare against split-adjusted values too (legacy
+    # appears to store post-split numbers).
     c = Counter()
     px_diffs = []
     sh_diffs = []
@@ -126,9 +128,9 @@ def main() -> None:
         l = legacy_by_key[k]
         o = ours_by_key[k]
         c['matched'] += 1
-        # OfferPx
+        # OfferPx — prefer split-adjusted to match legacy
         lpx = l.get('OfferPx')
-        opx = o.get('offer_price')
+        opx = o.get('offer_price_adjusted') or o.get('offer_price')
         if lpx is not None and opx is not None and opx > 0:
             d = abs(opx - lpx) / lpx
             px_diffs.append((d, k, lpx, opx))
@@ -142,9 +144,9 @@ def main() -> None:
                 c['px_mismatch_>=5%'] += 1
         else:
             c['px_missing'] += 1
-        # Shares
+        # Shares — adjusted to match legacy split basis
         lsh = l.get('Shares')
-        osh = o.get('shares')
+        osh = o.get('shares_adjusted') or o.get('shares')
         if lsh and osh and osh > 0:
             d = abs(osh - lsh) / lsh
             sh_diffs.append((d, k, lsh, osh))

@@ -29,6 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.edgar.fetch import get_cached  # noqa: E402
 from app.edgar.parse.form144 import parse_144  # noqa: E402
 from app.edgar.parse.form4 import parse_form4  # noqa: E402
+from app.mds.massive.splits import (  # noqa: E402
+    cumulative_factor,
+)
 from app.mds.syms import resolve_cik  # noqa: E402
 from app.parsers.reg_deal import (  # noqa: E402
     parse_member,
@@ -64,6 +67,16 @@ def _parse_iso(s: str) -> date | None:
 # ----- Reg seeding -----
 
 
+def _split_cols(symbol: str, pdt, shares: int, px: float) -> dict:
+    """Compute split-adjusted shares + price."""
+    f = cumulative_factor(symbol, pdt)
+    return {
+        'split_factor': float(f),
+        'shares_adjusted': int(round(shares * f)),
+        'offer_price_adjusted': float(px / f),
+    }
+
+
 def _row_from_reg_deal(deal, golden) -> dict | None:
     if (
         deal is None
@@ -87,15 +100,21 @@ def _row_from_reg_deal(deal, golden) -> dict | None:
         if deal.has_selling_stockholder
         else 'company'
     )
+    sym = deal.symbol or golden['Ticker']
     return {
         'price_date': pdt,
-        'symbol': deal.symbol or golden['Ticker'],
+        'symbol': sym,
         'offer_price': float(deal.offer_price),
         'type': 'Reg',
         'trade_date': pdt,
         'intraday': False,
         'shares': int(deal.shares_offered),
         'notional': float(notional),
+        **_split_cols(
+            sym, pdt,
+            deal.shares_offered,
+            deal.offer_price,
+        ),
         'seller': deal.issuer_name or '',
         'relationship': seller_rel,
         'banks': banks,
@@ -218,6 +237,9 @@ def _row_from_unreg(deal, golden) -> dict | None:
         'intraday': bool(golden.get('Intraday')),
         'shares': int(shares),
         'notional': float(notional),
+        **_split_cols(
+            golden['Ticker'], pdt, shares, px,
+        ),
         'seller': seller_name,
         'relationship': relationship,
         'banks': [],
