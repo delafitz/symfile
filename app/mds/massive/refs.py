@@ -21,7 +21,7 @@ from app.mds.massive.session import get_client
 from app.util.log import log
 
 MAX_AGE_DAYS = 7
-MIN_MKT_CAP = 1_000_000_000
+MIN_MKT_CAP = 750_000_000
 CONCURRENCY = 20
 
 
@@ -74,11 +74,11 @@ async def _fetch_refs_async(
             prices[s.ticker] = p
     log.info('snapshots loaded', count=len(prices))
 
-    # Build candidate list: CS + CIK + has price
+    # Build candidate list: CS or ADRC + CIK + price
     candidates = [
         sym
         for sym, info in tickers.items()
-        if info.get('type') == 'CS'
+        if info.get('type') in ('CS', 'ADRC')
         and info.get('cik')
         and sym in prices
     ]
