@@ -52,6 +52,33 @@ class UnregDeal:
             return 0.0
         return self.f144_mkt_value / self.f144_shares
 
+    @property
+    def evidence(self) -> str:
+        """Which filings contributed real evidence."""
+        f4 = self.shares_sold > 0
+        f144 = self.f144_shares > 0
+        if f4 and f144:
+            return 'both'
+        if f4:
+            return 'form4'
+        if f144:
+            return '144'
+        return 'none'
+
+    @property
+    def block_shares(self) -> int:
+        """Best size estimate. Prefers Form 4 sum
+        (actual executed); falls back to 144 sum
+        (declared intent)."""
+        return self.shares_sold or self.f144_shares
+
+    @property
+    def block_price(self) -> float:
+        """Best price estimate. Form 4 weighted avg
+        is closer to the block clear; 144 implicit
+        price is a filing-day market reference."""
+        return self.txn_price_wavg or self.f144_price
+
 
 def resolve_unreg_deal(
     *,
@@ -96,7 +123,9 @@ def resolve_unreg_deal(
         rpt = (t.reporter_cik or '').lstrip('0') or '0'
         if rpt == issuer_unpadded:
             continue
-        # txn_date must fall within ±3 of trade_date
+        # txn_date must fall within ±5 of trade_date.
+        # ±5 catches amended Form 4s that report sales
+        # a few days earlier than the block we labelled.
         if trade_date is not None and t.txn_date:
             try:
                 from datetime import datetime
@@ -105,7 +134,7 @@ def resolve_unreg_deal(
                 ).date()
             except ValueError:
                 continue
-            if abs((td - trade_date).days) > 3:
+            if abs((td - trade_date).days) > 5:
                 continue
         relevant.append(t)
 

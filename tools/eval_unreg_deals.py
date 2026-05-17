@@ -182,18 +182,25 @@ def main() -> None:
         bucket['rows'] += 1
         offer_px = r['g']['OfferPx']
 
-        if deal.shares_sold == 0:
-            bucket['no_sale_txn'] += 1
+        ev = deal.evidence
+        bucket[f'ev_{ev}'] += 1
+        if ev == 'none':
             continue
         bucket['resolved'] += 1
-        sizes.append(deal.shares_sold)
+        sizes.append(deal.block_shares)
 
-        pct = _pct(deal.txn_price_wavg, offer_px)
+        # Price delta: use Form 4 weighted avg when
+        # available, else 144 implicit price.
+        ours = deal.block_price
+        if ours <= 0:
+            bucket['resolved_no_price'] += 1
+            continue
+        pct = _pct(ours, offer_px)
         abs_pct = abs(pct)
         diffs.append((
-            pct, abs_pct, offer_px,
-            deal.txn_price_wavg, r['sym'],
-            r['trade_dt'].isoformat(),
+            pct, abs_pct, offer_px, ours,
+            r['sym'], r['trade_dt'].isoformat(),
+            ev,
         ))
 
         if abs_pct < 0.5:
@@ -207,36 +214,56 @@ def main() -> None:
 
     n = bucket['rows']
     res = bucket['resolved']
-    print(f'\n=== price validation ===')
+    print(f'\n=== resolution ===')
     print(f'  rows with candidates: {n}')
-    print(f'  resolved (got >=1 sale txn):  {res}'
+    print(f'  resolved (size from any source): {res}'
           f' ({res / n * 100:.1f}%)')
-    if res:
-        print(f'  no sale txn in window:        '
-              f'{bucket["no_sale_txn"]}')
-        print(f'\n  price delta vs OfferPx (of resolved):')
-        for k in (
-            'px_within_0.5pct', 'px_within_1pct',
-            'px_within_5pct', 'px_off_5pct+'
-        ):
-            v = bucket[k]
-            print(f'    {k:20s} {v:3d} ({v / res * 100:5.1f}%)')
+    print(f'    evidence: Form 4 + 144  {bucket["ev_both"]}')
+    print(f'    evidence: Form 4 only   {bucket["ev_form4"]}')
+    print(f'    evidence: 144 only      {bucket["ev_144"]}')
+    print(f'    evidence: none          {bucket["ev_none"]}')
+    if bucket['resolved_no_price']:
+        print(f'  resolved w/o price:     '
+              f'{bucket["resolved_no_price"]}')
+
+    # Price validation by evidence source
+    print(f'\n=== price delta vs OfferPx ===')
+    by_ev = Counter()
+    for pct, abs_pct, _, _, _, _, ev in diffs:
+        by_ev[(ev, 'n')] += 1
+        if abs_pct < 0.5: by_ev[(ev, '<0.5%')] += 1
+        elif abs_pct < 1.0: by_ev[(ev, '<1%')] += 1
+        elif abs_pct < 5.0: by_ev[(ev, '<5%')] += 1
+        else: by_ev[(ev, '>5%')] += 1
+
+    print(f'  {"source":12s}  {"n":>4s}  {"<0.5%":>6s}'
+          f'  {"<1%":>6s}  {"<5%":>6s}  {"≥5%":>6s}')
+    for ev in ('both', 'form4', '144'):
+        n_ev = by_ev[(ev, 'n')]
+        if not n_ev:
+            continue
+        print(
+            f'  {ev:12s}  {n_ev:>4d}  '
+            f'{by_ev[(ev, "<0.5%")]:>6d}  '
+            f'{by_ev[(ev, "<1%")]:>6d}  '
+            f'{by_ev[(ev, "<5%")]:>6d}  '
+            f'{by_ev[(ev, ">5%")]:>6d}'
+        )
 
     if sizes:
         sizes.sort()
         med = sizes[len(sizes) // 2]
-        print(f'\n  size summary:')
-        print(f'    median shares_sold:  {med:,}')
-        print(f'    min:                 {min(sizes):,}')
-        print(f'    max:                 {max(sizes):,}')
+        print(f'\n=== size summary ===')
+        print(f'  median: {med:,}  min: {min(sizes):,}  '
+              f'max: {max(sizes):,}')
 
-    # Worst outliers
+    # Worst outliers — by abs_pct
     diffs.sort(key=lambda x: -x[1])
     print(f'\n--- top 10 price-delta outliers ---')
-    for pct, _, gpx, opx, sym, td in diffs[:10]:
-        print(f'  {sym:6s}  {td}  '
+    for pct, _, gpx, opx, sym, td, ev in diffs[:10]:
+        print(f'  {sym:6s}  {td}  ev={ev:6s}  '
               f'golden=${gpx:7.2f}  ours=${opx:7.2f}  '
-              f'delta={pct:+6.2f}%')
+              f'delta={pct:+7.2f}%')
 
 
 if __name__ == '__main__':
