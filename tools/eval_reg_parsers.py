@@ -22,15 +22,9 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.edgar.fetch import get_cached  # noqa: E402
-from app.parsers.reg_424b5 import parse_424b5  # noqa: E402
-from app.parsers.reg_424b7 import parse_424b7  # noqa: E402
+from app.parsers.reg_deal import PARSERS  # noqa: E402
 
 LABELS = Path('data/corpus/reg_labels.parquet')
-
-PARSERS = {
-    '424B5': parse_424b5,
-    '424B7': parse_424b7,
-}
 
 TRACKED_FIELDS = [
     'shares_offered',

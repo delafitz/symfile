@@ -96,9 +96,9 @@ _OFFER_PX_RE = re.compile(
 )
 _BLOCK_PX_RE = re.compile(
     r'(?:agreed|committed)\s+to\s+purchase[\s\S]{0,400}?'
-    r'at\s+(?:a\s+|the\s+)?price\s+'
-    r'(?:of\s+|equal\s+to\s+)?'
-    r'\$\s*([\d]+\.[\d]{2,5})',
+    r'at\s+(?:(?:a\s+|the\s+)?price\s+(?:of\s+|equal\s+to\s+)?)?'
+    r'\$\s*([\d]+\.[\d]{2,5})\s*'
+    r'per\s+(?:share|unit|ordinary|common|ADS|ADR)',
     re.IGNORECASE,
 )
 _PER_SHARE_TABLE_RE = re.compile(
@@ -119,13 +119,20 @@ _TOTAL_TABLE_RE = re.compile(
     r'\bTotal\b[\s\S]{0,60}?'
     r'\$\s*([\d,]{7,})(?:\.[\d]{2})?'
 )
-# Block-deal proceeds: "...which will result in $X of
-# proceeds" / "...for aggregate proceeds of $X".
-# Some filings have a stray duplicate $ (typos like
-# "result in $ $344,374,110") so allow optional extra.
+# Block-deal proceeds. Two flavors:
+#  (a) full number: "result in $344,374,110"
+#  (b) M/B suffix: "result in approximately $96.0 million"
+# Some filings have a stray duplicate $ ("$ $344").
 _BLOCK_TOTAL_RE = re.compile(
     r'(?:will\s+result\s+in|aggregate\s+proceeds\s+of)'
-    r'\s+\$\s*\$?\s*([\d,]{7,})(?:\.[\d]{2})?',
+    r'\s+(?:approximately\s+)?'
+    r'\$\s*\$?\s*([\d,]{7,})(?:\.[\d]{2})?',
+    re.IGNORECASE,
+)
+_BLOCK_TOTAL_M_RE = re.compile(
+    r'(?:will\s+result\s+in|aggregate\s+proceeds\s+of)'
+    r'\s+(?:approximately\s+)?'
+    r'\$\s*([\d]+(?:\.[\d]+)?)\s+(million|billion)\b',
     re.IGNORECASE,
 )
 
@@ -157,12 +164,13 @@ _LAST_PX_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# "X,XXX,XXX shares" near the title (first 3000 chars).
-# Pattern: a comma-formatted number with 4+ digits
-# followed by up to ~3 descriptive words then "shares".
+# "X,XXX,XXX shares/units/ADSs" near the title (first
+# 3000 chars). MLPs trade in "Common Units"; ADRs in
+# "American Depositary Shares" (ADSs).
 _TITLE_SHARES_RE = re.compile(
     r'(?<!\$)\b([\d,]{4,})\s+'
-    r'(?:[\w-]+\s+){0,3}[Ss]hares\b'
+    r'(?:[\w-]+\s+){0,3}'
+    r'(?:[Ss]hares|[Uu]nits|ADSs?|ADRs?)\b'
 )
 
 # "We are offering N shares" — primary issuer count
@@ -220,7 +228,7 @@ def find_total(clean: str) -> float:
     Tries the public-offering-price row, then the
     "Total" row of a 3-column table, then block-deal
     "will result in $X" / "aggregate proceeds of $X"
-    phrasing.
+    phrasing — including "$96.0 million" suffix form.
     """
     for pat in (_TOTAL_RE, _TOTAL_TABLE_RE, _BLOCK_TOTAL_RE):
         m = pat.search(clean[:15000])
@@ -229,6 +237,12 @@ def find_total(clean: str) -> float:
         val = float(m.group(1).replace(',', ''))
         if val > 1_000_000:
             return val
+    # M/B suffix fallback
+    m = _BLOCK_TOTAL_M_RE.search(clean[:15000])
+    if m:
+        base = float(m.group(1))
+        scale = 1_000_000 if m.group(2).lower() == 'million' else 1_000_000_000
+        return base * scale
     return 0.0
 
 
@@ -329,3 +343,75 @@ def is_bought_deal(clean: str) -> bool:
 
 def is_ipo(clean: str) -> bool:
     return 'initial public offering' in clean[:15000].lower()
+
+
+# --- Shared dispatcher ---
+
+
+def _is_non_equity(low: str) -> bool:
+    """Reject filings that aren't common-stock blocks:
+    debt notes, ATM, shelf base, preferred (excluding
+    American Depositary Shares)."""
+    if 'notes' in low[:2000] and 'shares' not in low[:2000]:
+        return True
+    if 'at the market' in low or 'at-the-market' in low:
+        return True
+    if 'may from time to time' in low[:3000]:
+        return True
+    title = low[:3000]
+    if 'trust preferred' in title or 'series of preferred' in title:
+        return True
+    if 'depositary shares' in title and 'american depositary' not in title:
+        return True
+    return False
+
+
+def parse_supplement(
+    raw: bytes, form_type: str,
+) -> RegFiling | None:
+    """Generic 424B* cover-page extraction.
+
+    Used by all per-form parsers (424B2/3/4/5/7).
+    Returns None for non-equity filings.
+    """
+    text = decode_raw(raw)
+    clean = strip_html(text)
+    low = clean[:10000].lower()
+
+    if _is_non_equity(low):
+        return None
+
+    f = RegFiling(form_type=form_type)
+    f.shares_offered = find_title_shares(clean)
+    if f.shares_offered == 0:
+        f.missing.append('shares_offered')
+
+    f.offer_price = find_offer_price(clean)
+    if f.offer_price == 0.0:
+        f.missing.append('offer_price')
+
+    f.total = find_total(clean)
+    if f.total == 0.0:
+        f.missing.append('total')
+
+    f.last_price, f.last_price_date = find_last_price(clean)
+    if f.last_price == 0.0:
+        f.missing.append('last_price')
+
+    f.issuer_shares = find_issuer_shares(clean)
+    has_ssh, ssh_n = find_ssh(clean)
+    f.has_selling_stockholder = has_ssh
+    f.ssh_shares = ssh_n
+
+    f.ticker = find_ticker(clean)
+    if not f.ticker:
+        f.missing.append('ticker')
+    f.exchange = find_exchange(clean)
+    if not f.exchange:
+        f.missing.append('exchange')
+
+    f.is_preliminary = is_preliminary(clean)
+    f.is_ipo = is_ipo(clean)
+    f.is_bought = is_bought_deal(clean)
+
+    return f

@@ -26,8 +26,19 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from app.parsers.reg import RegFiling
+from app.parsers.reg_424b2 import parse_424b2
+from app.parsers.reg_424b3 import parse_424b3
+from app.parsers.reg_424b4 import parse_424b4
 from app.parsers.reg_424b5 import parse_424b5
 from app.parsers.reg_424b7 import parse_424b7
+
+PARSERS = {
+    '424B2': parse_424b2,
+    '424B3': parse_424b3,
+    '424B4': parse_424b4,
+    '424B5': parse_424b5,
+    '424B7': parse_424b7,
+}
 
 
 @dataclass
@@ -83,12 +94,8 @@ def parse_member(
     raw: bytes,
 ) -> ClusterMember:
     """Run the appropriate per-form parser."""
-    if form_type == '424B5':
-        parsed = parse_424b5(raw)
-    elif form_type == '424B7':
-        parsed = parse_424b7(raw)
-    else:
-        parsed = None
+    parser = PARSERS.get(form_type)
+    parsed = parser(raw) if parser else None
     return ClusterMember(
         filename=filename,
         filing_date=filing_date,
@@ -176,6 +183,34 @@ def resolve_deal(
     deal.underwriter = _first_nonempty(
         finals_first, 'underwriter'
     )
+
+    # Cross-derive total or offer_price when only one
+    # of the three (total, shares, offer_price) is
+    # missing. This handles MLPs that omit total on
+    # the cover, and block-deal covers that bury the
+    # price in an unusual phrasing.
+    if (
+        deal.total == 0.0
+        and deal.shares_offered > 0
+        and deal.offer_price > 0.0
+    ):
+        deal.total = deal.shares_offered * deal.offer_price
+    elif (
+        deal.offer_price == 0.0
+        and deal.shares_offered > 0
+        and deal.total > 0.0
+    ):
+        deal.offer_price = deal.total / deal.shares_offered
+    elif (
+        deal.shares_offered == 0
+        and deal.total > 0.0
+        and deal.offer_price > 0.0
+    ):
+        # Dollar-denominated offerings (no share count
+        # in the title) — derive shares from $/total.
+        deal.shares_offered = round(
+            deal.total / deal.offer_price
+        )
 
     deal.is_bought = any(
         m.parsed.is_bought for m in parsed_members
