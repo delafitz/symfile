@@ -78,7 +78,15 @@ def main() -> None:
     print(f'loading {blocks.height} blocks')
 
     deals = []
+    skipped_zero_shares = 0
     for r in blocks.sort(['price_date', 'symbol']).to_dicts():
+        # Skip rows with no size — they're golden
+        # anchors waiting on an external share count.
+        # They stay in blocks.parquet but aren't useful
+        # for backtests.
+        if not r['shares']:
+            skipped_zero_shares += 1
+            continue
         deal = {
             'ticker':       r['symbol'],
             'cik':          r['cik'],
@@ -112,6 +120,12 @@ def main() -> None:
     out_path = OUT_DIR / f'block_golden_bootstrap.{stamp}.json'
     out_path.write_text(json.dumps(out, indent=2, default=str))
     print(f'wrote {len(deals)} deals -> {out_path}')
+    if skipped_zero_shares:
+        print(
+            f'  (skipped {skipped_zero_shares} rows with '
+            'shares=0 — populate manual_shares.csv to '
+            'include them)'
+        )
 
     # Summary print
     from collections import Counter
