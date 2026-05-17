@@ -324,14 +324,31 @@ def find_last_price(clean: str) -> tuple[float, str]:
 
 
 def find_title_shares(clean: str) -> int:
-    """Largest comma-separated 'N shares' in first
-    3000 chars (the title region)."""
-    best = 0
+    """First comma-separated 'N shares' in the title
+    region (first 3000 chars).
+
+    The title always leads — "30,500,000 Shares Joby
+    Aviation..." — so the first match is the offering
+    size. Later numbers ("up to 35,199,549 shares of
+    our common stock previously registered") describe
+    the shelf cap, not this offering.
+
+    Rejects:
+      - dollar amounts: "$ 15.651 $ 469,530,000 Delivery
+        of the shares" — when preceding ~10 chars end
+        in '$'
+      - shelf-history phrases: "up to ...", "previously
+        registered", "registered hereunder"
+    """
     for m in _TITLE_SHARES_RE.finditer(clean[:3000]):
-        n = int(m.group(1).replace(',', ''))
-        if n > best:
-            best = n
-    return best
+        before = clean[max(0, m.start() - 30):m.start()]
+        if before.strip().endswith('$'):
+            continue
+        low = before.lower()
+        if 'up to' in low or 'previously' in low:
+            continue
+        return int(m.group(1).replace(',', ''))
+    return 0
 
 
 def find_issuer_shares(clean: str) -> int:
