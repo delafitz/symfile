@@ -1,7 +1,13 @@
 """Symbol-to-CIK mapping via Polygon tickers endpoint.
 
-Caches to data/mds/tickers.YYYYMMDD.csv. Reuses cache
-if less than MAX_AGE_DAYS old, otherwise refetches.
+Two flavors, both cached separately:
+
+  tickers.YYYYMMDD.csv          — active symbols (the
+                                   trading universe input)
+  tickers_inactive.YYYYMMDD.csv — delisted/acquired
+                                   symbols (resolution-only)
+
+Reuses cache if less than MAX_AGE_DAYS old, otherwise refetches.
 """
 
 import re
@@ -16,10 +22,15 @@ from app.util.log import log
 
 MAX_AGE_DAYS = 30
 
+_PATTERNS = {
+    True: re.compile(r'tickers\.(\d{8})\.csv$'),
+    False: re.compile(r'tickers_inactive\.(\d{8})\.csv$'),
+}
+_FILE_PREFIX = {True: 'tickers', False: 'tickers_inactive'}
 
-def _find_cached() -> tuple[Path, date] | None:
-    """Find most recent tickers cache file."""
-    pattern = re.compile(r'tickers\.(\d{8})\.csv$')
+
+def _find_cached(active: bool) -> tuple[Path, date] | None:
+    pattern = _PATTERNS[active]
     best: tuple[Path, date] | None = None
     if not DATA_DIR.exists():
         return None
@@ -35,13 +46,13 @@ def _find_cached() -> tuple[Path, date] | None:
     return best
 
 
-def _fetch_tickers() -> list[dict]:
-    """Fetch all tickers from Polygon."""
+def _fetch_tickers(active: bool) -> list[dict]:
+    """Fetch tickers from Polygon."""
     client = get_client()
     rows = []
     for t in client.list_tickers(
         market='stocks',
-        active=True,
+        active=active,
         limit=1000,
     ):
         cik = getattr(t, 'cik', None)
@@ -58,46 +69,57 @@ def _fetch_tickers() -> list[dict]:
     return rows
 
 
-def _save(rows: list[dict]) -> Path:
-    """Save tickers to dated CSV."""
+def _save(rows: list[dict], active: bool) -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     stamp = date.today().strftime('%Y%m%d')
-    path = DATA_DIR / f'tickers.{stamp}.csv'
+    path = DATA_DIR / f'{_FILE_PREFIX[active]}.{stamp}.csv'
     df = pl.DataFrame(
         rows,
         schema=['symbol', 'name', 'cik', 'type'],
     )
     df.write_csv(path)
-    log.info('saved tickers', count=len(rows), path=str(path))
+    log.info(
+        'saved tickers',
+        active=active,
+        count=len(rows),
+        path=str(path),
+    )
     return path
 
 
 def load_tickers(
     max_age_days: int = MAX_AGE_DAYS,
+    active: bool = True,
 ) -> dict[str, dict]:
-    """Load symbol->{name, cik} mapping.
+    """Load symbol->{name, cik, type} mapping.
 
-    Returns cached data if fresh, otherwise refetches.
+    active=True returns the current trading universe input.
+    active=False returns delisted/acquired tickers — used
+    only for historical symbol resolution, not for building
+    refs.
     """
-    cached = _find_cached()
-    cutoff = date.today() - timedelta(
-        days=max_age_days
-    )
+    cached = _find_cached(active)
+    cutoff = date.today() - timedelta(days=max_age_days)
 
     if cached and cached[1] >= cutoff:
         path = cached[0]
-        log.debug('cached tickers', file=path.name)
+        log.debug(
+            'cached tickers', active=active, file=path.name
+        )
         df = pl.read_csv(path, infer_schema=False)
         result = {
-            row['symbol']: row
-            for row in df.to_dicts()
+            row['symbol']: row for row in df.to_dicts()
         }
-        log.info('tickers loaded', count=len(result))
+        log.info(
+            'tickers loaded',
+            active=active,
+            count=len(result),
+        )
         return result
 
-    log.info('fetching tickers')
-    rows = _fetch_tickers()
-    _save(rows)
+    log.info('fetching tickers', active=active)
+    rows = _fetch_tickers(active=active)
+    _save(rows, active=active)
     return {r['symbol']: r for r in rows}
 
 

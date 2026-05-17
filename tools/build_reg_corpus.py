@@ -32,10 +32,8 @@ sys.path.insert(
 )
 
 from app.edgar.fetch import get_cached  # noqa: E402
-from app.mds.massive.refs import (  # noqa: E402
-    build_cik_map,
-)
-from app.mds.syms import load_syms  # noqa: E402
+from app.mds.syms import load_syms, resolve_cik  # noqa: E402
+from app.mds.massive.tickers import load_tickers  # noqa: E402
 
 CORPUS_DIR = Path('data/corpus')
 GOLDEN_PATH = Path(
@@ -108,10 +106,10 @@ def build_corpus(
 
 def build_labels(
     corpus: pl.DataFrame,
-    syms: dict,
 ) -> pl.DataFrame:
     """For each regs_golden row, find corpus candidates
-    within ±5 days for the same symbol."""
+    within ±5 days for the same symbol. Symbols that
+    can't be resolved via resolve_cik are skipped."""
     golden = json.loads(GOLDEN_PATH.read_text())
     rows = []
     TOL = timedelta(days=5)
@@ -120,7 +118,7 @@ def build_labels(
         pd = _parse_golden_date(g.get('PriceDt'))
         if not sym or not pd:
             continue
-        if sym not in syms:
+        if resolve_cik(sym) is None:
             continue
         sub = corpus.filter(pl.col('symbol') == sym)
         for r in sub.to_dicts():
@@ -144,12 +142,27 @@ def build_labels(
 
 
 def main() -> None:
-    print('loading syms...')
+    print('loading tickers...')
+    # Refs is the primary CIK→symbol source: it's already
+    # filtered to the canonical common-stock symbol per CIK
+    # (via Polygon's snapshot + mkt_cap pass). Without that
+    # filter, a CIK with multiple CS-typed symbols (e.g.
+    # ACGL + ACGLN preferred series) overrides the primary.
+    # Inactive tickers fill in delisted CIKs that aren't in
+    # refs at all.
+    cik_to_sym: dict[str, str] = {}
     syms = load_syms()
-    cik_to_sym = {
-        ref.cik.lstrip('0') or '0': sym
-        for sym, ref in syms.items()
-    }
+    for sym, ref in syms.items():
+        cik_to_sym[ref.cik.lstrip('0') or '0'] = sym
+    for sym, info in load_tickers(active=False).items():
+        if info.get('type') not in ('CS', 'ADRC'):
+            continue
+        cik = info.get('cik')
+        if not cik:
+            continue
+        cik = cik.lstrip('0') or '0'
+        if cik not in cik_to_sym:
+            cik_to_sym[cik] = sym
 
     print('building corpus...')
     corpus = build_corpus(cik_to_sym)
@@ -170,7 +183,7 @@ def main() -> None:
         print(f'    {r["form_type"]:8s} {r["len"]:6d}')
 
     print('\nbuilding labels...')
-    labels = build_labels(corpus, syms)
+    labels = build_labels(corpus)
     labels_path = CORPUS_DIR / 'reg_labels.parquet'
     labels.write_parquet(labels_path)
     print(

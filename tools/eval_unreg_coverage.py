@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.mds.syms import load_syms  # noqa: E402
+from app.mds.syms import resolve_cik  # noqa: E402
 
 GOLDEN = Path('data/bootstrap/unreg_golden.20260517.json')
 INDEX_DIR = Path('data/indices')
@@ -77,17 +77,11 @@ def main() -> None:
     golden = json.loads(GOLDEN.read_text())
     print(f'loaded {len(golden)} golden rows')
 
-    syms = load_syms()
-    sym_to_cik = {
-        s: r.cik.lstrip('0') or '0'
-        for s, r in syms.items()
-    }
-
     print('indexing 144/4 by issuer CIK...')
     by_cik = _load_index_by_cik()
 
     c = Counter()
-    not_in_syms = []
+    not_resolved = []
     no_filings = []
 
     for g in golden:
@@ -102,11 +96,10 @@ def main() -> None:
         lo = price - timedelta(days=2)
         hi = trade + timedelta(days=WINDOW_DAYS)
 
-        if sym not in sym_to_cik:
-            not_in_syms.append((sym, g['PriceDt']))
+        cik = resolve_cik(sym)
+        if cik is None:
+            not_resolved.append((sym, g['PriceDt']))
             continue
-
-        cik = sym_to_cik[sym]
         hits = [
             (d, form, fn)
             for d, form, fn in by_cik.get(cik, [])
@@ -135,18 +128,18 @@ def main() -> None:
     covered = c['both'] + c['form4_only'] + c['144_only']
     print(f'\n=== coverage ===')
     print(f'  golden rows:     {n}')
-    print(f'  in sym universe: {n - len(not_in_syms)}')
+    print(f'  cik resolved:    {n - len(not_resolved)}')
     print(f'  covered:         {covered}'
           f' ({covered / n * 100:.1f}%)')
     print(f'    both 144+F4:   {c["both"]}')
     print(f'    F4 only:       {c["form4_only"]}')
     print(f'    144 only:      {c["144_only"]}')
-    print(f'  not in syms:     {len(not_in_syms)}')
+    print(f'  cik unresolved:  {len(not_resolved)}')
     print(f'  missed:          {len(no_filings)}')
 
-    if not_in_syms:
-        print('\n--- not in syms universe ---')
-        for s, d in not_in_syms[:30]:
+    if not_resolved:
+        print('\n--- cik unresolved ---')
+        for s, d in not_resolved[:30]:
             print(f'  {s:8s}  {d}')
 
     if no_filings:
