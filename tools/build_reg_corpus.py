@@ -108,8 +108,9 @@ def build_labels(
     corpus: pl.DataFrame,
 ) -> pl.DataFrame:
     """For each regs_golden row, find corpus candidates
-    within ±5 days for the same symbol. Symbols that
-    can't be resolved via resolve_cik are skipped."""
+    within ±5 days. Matching is by CIK (not symbol) so
+    ticker changes (CCCS -> CCC, ALIT, etc.) still pair
+    the golden row with the right historical filings."""
     golden = json.loads(GOLDEN_PATH.read_text())
     rows = []
     TOL = timedelta(days=5)
@@ -118,9 +119,10 @@ def build_labels(
         pd = _parse_golden_date(g.get('PriceDt'))
         if not sym or not pd:
             continue
-        if resolve_cik(sym) is None:
+        cik = resolve_cik(sym)
+        if cik is None:
             continue
-        sub = corpus.filter(pl.col('symbol') == sym)
+        sub = corpus.filter(pl.col('cik') == cik)
         for r in sub.to_dicts():
             try:
                 cd = datetime.fromisoformat(
