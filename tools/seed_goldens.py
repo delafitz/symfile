@@ -56,6 +56,9 @@ LEGACY_SEED = Path('data/bootstrap/legacy_seed.csv')
 # foreign-private issuers, etc.). Looked up by
 # (cik, PxDt) so CCCS<->CCC ticker renames resolve.
 LEGACY_BLOCKS = Path('data/bootstrap/block_trades.20260321.json')
+# Final fallback for unreg `shares` when neither SEC
+# filings nor the legacy bootstrap has a count.
+MANUAL_SHARES = Path('data/bootstrap/manual_shares.csv')
 
 # Legacy uses shorthand bank codes; map to our canonical
 # keys (compare_old_blocks.py shares this convention).
@@ -111,6 +114,27 @@ def _load_legacy_shares() -> dict[tuple[str, str], int]:
 
 
 _LEGACY_SHARES = _load_legacy_shares()
+
+
+def _load_manual_shares() -> dict[tuple[str, str], int]:
+    """(Ticker, PriceDt) -> manual Shares override."""
+    import csv
+    out: dict[tuple[str, str], int] = {}
+    if not MANUAL_SHARES.exists():
+        return out
+    with MANUAL_SHARES.open() as fh:
+        for r in csv.DictReader(fh):
+            sh = r.get('shares', '').strip()
+            if not sh:
+                continue
+            try:
+                out[(r['Ticker'], r['PriceDt'])] = int(sh)
+            except ValueError:
+                continue
+    return out
+
+
+_MANUAL_SHARES = _load_manual_shares()
 
 
 def _parse_golden_date(s: str) -> date | None:
@@ -295,8 +319,11 @@ def _row_from_unreg(deal, golden) -> dict | None:
     if pdt is None or px <= 0:
         return None
 
-    # Size: prefer SEC-extracted (Form 4 sum then 144);
-    # fall back to legacy bootstrap by (CIK, PriceDt).
+    # Size resolution order:
+    #   1. Form 4 sum (block_shares from resolver)
+    #   2. 144 sum (block_shares falls back to it)
+    #   3. legacy bootstrap by (CIK, PriceDt)
+    #   4. manual override by (Ticker, PriceDt)
     shares = deal.block_shares if deal else 0
     if shares == 0:
         cik = (
@@ -309,6 +336,12 @@ def _row_from_unreg(deal, golden) -> dict | None:
             )
             if legacy_sh:
                 shares = legacy_sh
+    if shares == 0:
+        manual_sh = _MANUAL_SHARES.get(
+            (golden['Ticker'], golden['PriceDt'])
+        )
+        if manual_sh:
+            shares = manual_sh
     notional = shares * px if shares else 0.0
 
     # Seller: top entity by aggregated size; join the
