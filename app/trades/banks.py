@@ -33,7 +33,7 @@ BANKS: dict[str, list[str]] = {
     'BCS':  ['barclays'],
     'UBS':  ['ubs'],
     'JEF':  ['jefferies'],
-    'RY':   ['rbc capital', 'rbc '],
+    'RBC':  ['rbc capital', 'rbc '],
     'WFC':  ['wells fargo'],
     'SF':   ['stifel'],
     'SCHW': ['charles schwab', 'schwab'],

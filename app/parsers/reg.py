@@ -410,12 +410,33 @@ _UNDERWRITER_LABEL_RE = [
 ]
 
 
+_DATE_SENTINELS = (
+    'the date of this prospectus supplement is',
+    # Requires the comma — without it we'd match the
+    # base-prospectus cross-reference line
+    # ("To Prospectus dated... and Prospectus Supplement
+    # dated..."), which sits well before the cover end.
+    'prospectus supplement, dated',
+)
+# Universal cover-page tail. Used as a last-resort
+# anchor when no date phrasing matches: bookrunners
+# typically sit in the last lines of the cover, right
+# before the TOC kicks in.
+_TOC_SENTINEL = 'table of contents'
+
+
 def find_underwriters(clean: str) -> str:
     """Extract bookrunner names from the cover.
 
-    Two strategies: labelled "Book-Running Managers"
-    section first; otherwise look for known bank names
-    clustered near "The date of this prospectus..."
+    Two strategies:
+    1) Labelled "Book-Running Managers" section.
+    2) Otherwise look for known bank names clustered
+       just before any of several date sentinels
+       ("the date of...", "Prospectus Supplement,
+       dated...", etc.). Some sole-bookrunner deals
+       (KDP) print the bank a few lines after the
+       pricing table — widen to ~1500 chars back so
+       it falls in the search window.
     """
     for pat in _UNDERWRITER_LABEL_RE:
         m = pat.search(clean[:15000])
@@ -431,11 +452,24 @@ def find_underwriters(clean: str) -> str:
                     raw = raw[:si].strip()
             return raw[:200]
 
-    di = clean.lower().find(
-        'the date of this prospectus supplement is'
-    )
+    low = clean.lower()
+    # Look for explicit date phrasings first; fall back
+    # to the table-of-contents tail as a universal
+    # cover-end anchor.
+    di = -1
+    for sentinel in _DATE_SENTINELS:
+        i = low.find(sentinel)
+        if i >= 0 and (di < 0 or i < di):
+            di = i
+    if di < 0:
+        # The first "Table of Contents" hit is usually
+        # in the SGML title strip ("424B3 Table of
+        # Contents Filed Pursuant to..."). Skip past
+        # that and use the next occurrence, which marks
+        # the actual end of the cover page.
+        di = low.find(_TOC_SENTINEL, 2000)
     if di > 0:
-        chunk = clean[max(0, di - 400) : di]
+        chunk = clean[max(0, di - 1500) : di]
         found = [
             (b, chunk.index(b))
             for b in KNOWN_BANKS
