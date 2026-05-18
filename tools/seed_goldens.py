@@ -344,11 +344,20 @@ def _row_from_unreg(deal, golden) -> dict | None:
             shares = manual_sh
     notional = shares * px if shares else 0.0
 
-    # Banks: pull from legacy when present. Unreg
-    # filings (144 / Form 4) don't disclose the
-    # underwriter, so this is the only source.
+    # Banks resolution order:
+    #   1. 144 broker (largest by aggregated shares
+    #      through parse_banks for canonical mapping —
+    #      handles wealth-mgmt subsidiaries like
+    #      Merrill Lynch -> BAC, MS Smith Barney -> MS)
+    #   2. legacy LeftBank when 144s gave nothing
     banks: list[str] = []
-    if legacy_match and legacy_match['left_bank']:
+    if deal and deal.brokers:
+        for br in deal.brokers:
+            mapped = parse_banks(br)
+            if mapped and mapped != ['Other']:
+                banks = mapped[:1]
+                break
+    if not banks and legacy_match and legacy_match['left_bank']:
         lb = legacy_match['left_bank'].strip()
         banks = [_LEGACY_BANK_MAP.get(lb, lb)]
 
