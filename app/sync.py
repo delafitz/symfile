@@ -38,10 +38,8 @@ from app.holdings.form4 import (
 from app.holdings.schedule13d import (
     upsert_13d,
 )
-from app.trades.hist import (
-    build_144_trade,
-    build_reg_trade,
-)
+from app.detect.reg import detect_reg_blocks
+from app.detect.unreg import detect_unreg_blocks
 from app.trades.table import upsert_trades
 from app.parsers.reg import BANK_SYMS, REG_FORMS
 from app.mds.syms import (
@@ -357,7 +355,10 @@ def sync(
     if not to_process:
         return new
 
-    pending_trades = []
+    # Track which CIKs had reg/144/Form 4 activity so
+    # the detect pass below knows where to look.
+    touched_reg_ciks: set[str] = set()
+    touched_unreg_ciks: set[str] = set()
 
     def dispatch(f, raw):
         if f.form_type == '13F-HR/A':
@@ -379,18 +380,17 @@ def sync(
                     cik_map,
                     sym_universe,
                 )
+                # Match issuer CIK from the parsed XML —
+                # Form 4 index lines are keyed on the
+                # filer (insider) CIK, not the issuer.
+                issuer = txns[0].issuer_cik.lstrip('0') or '0'
+                if issuer in universe_ciks:
+                    touched_unreg_ciks.add(issuer)
         elif is_144(f):
-            t = build_144_trade(
-                f, raw, cik_map
-            )
-            if t:
-                pending_trades.append(t)
+            # 144 index lines use the issuer CIK.
+            touched_unreg_ciks.add(f.cik)
         elif is_reg(f):
-            t = build_reg_trade(
-                f, raw, cik_map
-            )
-            if t:
-                pending_trades.append(t)
+            touched_reg_ciks.add(f.cik)
         elif callback:
             callback(f, raw)
 
@@ -404,15 +404,42 @@ def sync(
         )
     )
 
-    # Trade emission is being rewritten for the new
-    # deal-level (price_date, symbol, offer_price)
-    # schema. The legacy per-filing Trade dataclass
-    # is no longer compatible with trades.parquet —
-    # disable until the new flagger lands.
-    if pending_trades:
-        log.info(
-            'sync: deferring trade upsert',
-            count=len(pending_trades),
+    # --- Block detection over the touched CIK set ---
+    # The cluster window may extend a few days past the
+    # sync boundaries; detect handles that internally.
+    sync_dates = {f.date_filed for f in to_process}
+    if sync_dates:
+        sync_lo = min(
+            date.fromisoformat(d) for d in sync_dates
         )
+        sync_hi = max(
+            date.fromisoformat(d) for d in sync_dates
+        )
+    else:
+        sync_lo = sync_hi = today
+
+    candidates: list[dict] = []
+    if touched_reg_ciks:
+        candidates.extend(detect_reg_blocks(
+            touched_ciks=touched_reg_ciks,
+            cik_map=cik_map,
+            lo=sync_lo,
+            hi=sync_hi,
+        ))
+    if touched_unreg_ciks:
+        candidates.extend(detect_unreg_blocks(
+            touched_ciks=touched_unreg_ciks,
+            cik_map=cik_map,
+            lo=sync_lo,
+            hi=sync_hi,
+        ))
+    log.info(
+        'detect',
+        reg_ciks=len(touched_reg_ciks),
+        unreg_ciks=len(touched_unreg_ciks),
+        candidates=len(candidates),
+    )
+    if candidates:
+        upsert_trades(candidates, protect_curated=True)
 
     return new

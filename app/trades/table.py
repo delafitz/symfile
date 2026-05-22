@@ -78,17 +78,43 @@ def _save(df: pl.DataFrame) -> None:
     df.write_parquet(TABLE_PATH)
 
 
-def upsert_trades(rows: list[dict]) -> int:
+def upsert_trades(
+    rows: list[dict],
+    protect_curated: bool = False,
+) -> int:
     """Merge new rows. Key collisions overwrite the
-    existing row. Returns count of net-new rows."""
+    existing row. Returns count of net-new rows.
+
+    When protect_curated=True, rows whose key already
+    exists with evidence != 'detected' are skipped —
+    used by sync's detect pass so it doesn't clobber
+    golden-seeded data on a re-run.
+    """
     if not rows:
         return 0
 
     new_df = pl.DataFrame(rows, schema=SCHEMA)
-    # Dedupe within the batch on the key.
     new_df = new_df.unique(subset=KEY_COLS, keep='last')
 
     existing = load_trades()
+
+    if protect_curated and existing.height > 0:
+        curated = existing.filter(
+            pl.col('evidence') != 'detected'
+        ).select(KEY_COLS)
+        new_df = new_df.join(
+            curated, on=KEY_COLS, how='anti'
+        )
+        if new_df.height == 0:
+            log.info(
+                'upsert trades',
+                new=len(rows),
+                added=0,
+                skipped_curated=len(rows),
+                total=existing.height,
+            )
+            return 0
+
     keys = new_df.select(KEY_COLS)
     kept = existing.join(keys, on=KEY_COLS, how='anti')
     merged = pl.concat([kept, new_df])

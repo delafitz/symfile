@@ -143,17 +143,34 @@ def scan(
         ),
     ] = False,
 ) -> None:
-    """Scan for block trades (144 + reg).
+    """Scan for block trades over a date range.
 
-    Trade emission is being rewritten for the deal-level
-    (price_date, symbol, offer_price) schema. The legacy
-    Trade dataclass is no longer persisted — this command
-    only prints the candidate list it would have emitted.
+    Runs the detect pass directly without going through
+    full sync intake. Useful for backfilling candidates
+    after a parser improvement.
+
+    Writes to trades.parquet with protect_curated=True
+    so golden-seeded rows aren't disturbed.
     """
+    from app.detect.reg import detect_reg_blocks
+    from app.detect.unreg import detect_unreg_blocks
+    from app.mds.massive.refs import build_cik_map
     from app.mds.syms import load_syms
-    from app.trades.hist import get_trades
+    from app.trades.table import upsert_trades
 
     syms = load_syms()
+    cik_map = build_cik_map(syms)
+    all_ciks = set(cik_map.keys())
+    if symbol:
+        sym = symbol.upper()
+        ref = syms.get(sym)
+        if not ref:
+            print(f'{sym} not in universe')
+            return
+        cik = ref.cik.lstrip('0') or '0'
+        target_ciks = {cik}
+    else:
+        target_ciks = all_ciks
 
     start = end = None
     if date_str:
@@ -163,40 +180,43 @@ def scan(
             int(date_str[6:]),
         )
         start = end = d
+    if start is None or end is None:
+        print('--date required (YYYYMMDD)')
+        return
 
-    types = 'both'
-    if only_144:
-        types = '144'
-    elif only_reg:
-        types = 'reg'
+    candidates: list[dict] = []
+    if not only_144:
+        candidates.extend(detect_reg_blocks(
+            touched_ciks=target_ciks,
+            cik_map=cik_map,
+            lo=start, hi=end,
+        ))
+    if not only_reg:
+        candidates.extend(detect_unreg_blocks(
+            touched_ciks=target_ciks,
+            cik_map=cik_map,
+            lo=start, hi=end,
+        ))
 
-    trades = get_trades(
-        syms,
-        start=start,
-        end=end,
-        symbol=symbol.upper() if symbol else None,
-        types=types,
-    )
-    trades.sort(key=lambda t: -t.implied_value)
-
-    print(f'\n{len(trades)} candidates (not persisted)')
+    added = upsert_trades(candidates, protect_curated=True)
+    print(f'\n{len(candidates)} candidates, {added} new')
+    candidates.sort(key=lambda r: -r['adj_shares'] * r['adj_price'])
     print(
-        f'\n{"SYM":<6s} {"DATE":<12s} '
-        f'{"TYPE":<8s} {"SHARES":>12s} '
-        f'{"IMPLIED":>14s} '
-        f'{"MKT_CAP":>10s}  SELLER'
+        f'\n{"SYM":<6s} {"PxDt":<12s} {"TYPE":<6s} '
+        f'{"SHARES":>12s} {"PRICE":>9s} '
+        f'{"NOTIONAL":>14s}  SELLER'
     )
-    print('-' * 90)
-    for t in trades:
-        cap_b = t.mkt_cap / 1e9
+    print('-' * 100)
+    for r in candidates[:50]:
+        n = r['adj_shares'] * r['adj_price']
         print(
-            f'{t.symbol:<6s} '
-            f'{t.date_filed:<12s} '
-            f'{t.filing_type:<8s} '
-            f'{t.shares:>12,} '
-            f'${t.implied_value:>13,.0f} '
-            f'{cap_b:>9.1f}B  '
-            f'{t.seller[:30]}'
+            f'{r["symbol"]:<6s} '
+            f'{str(r["price_date"]):<12s} '
+            f'{r["type"]:<6s} '
+            f'{r["adj_shares"]:>12,} '
+            f'${r["adj_price"]:>8.2f} '
+            f'${n:>13,.0f}  '
+            f'{(r["seller"] or "")[:30]}'
         )
 
 
